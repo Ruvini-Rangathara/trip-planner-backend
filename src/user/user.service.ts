@@ -12,12 +12,17 @@ import {
   getUserByEmailDto,
 } from './dto/get-user.dto';
 import PrismaUtil from 'src/common/util/PrismaUtil';
+import { LoginDto } from './dto/login.dto';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+  ) {}
 
   async create(data: CreateUserDto): Promise<UserDto> {
     this.logger.log('Creating a new user');
@@ -96,7 +101,10 @@ export class UserService {
       const user = await this.prisma.user.findUnique({
         where: { email: data.email },
       });
-      return user ? new UserDto(user) : null;
+      if (!user) {
+        throw new Error('User not found');
+      }
+      return new UserDto(user);
     } catch (error) {
       this.logger.error('Error finding user by email', error);
       throw error;
@@ -128,5 +136,22 @@ export class UserService {
       this.logger.error('Error retrieving all users', error);
       throw error;
     }
+  }
+
+  async login(data: LoginDto): Promise<{ access_token: string }> {
+    const user = await this.getByEmail({ email: data.email });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    const isPasswordValid = await bcrypt.compare(data.password, user.password);
+
+    if (!isPasswordValid) {
+      throw new Error('Invalid password');
+    }
+
+    const payload = { sub: user.id, email: user.email };
+    const access_token = this.jwtService.sign(payload);
+    return { access_token };
   }
 }

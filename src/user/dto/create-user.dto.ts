@@ -5,10 +5,6 @@ import { $Enums, TravelType } from '@prisma/client';
 export class CreateUserDto {
   @IsString()
   @ApiProperty()
-  id: string;
-
-  @IsString()
-  @ApiProperty()
   name: string;
 
   @IsString()

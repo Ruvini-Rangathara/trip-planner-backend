@@ -1,13 +1,18 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { UserService } from './user.service';
-import { ApiBody, ApiOperation } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation } from '@nestjs/swagger';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ApiResponses } from 'src/common/decorator/api/api-responses.decorator';
 import {
   getAllUserRequestDto,
   getAllUserResponseDto,
+  getOneUserDto,
   getUserByEmailDto,
 } from './dto/get-user.dto';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { DeleteUserDto } from './dto/delete-user.dto';
+import { LoginDto } from './dto/login.dto';
 
 @Controller('user')
 export class UserController {
@@ -33,7 +38,7 @@ export class UserController {
   @HttpCode(200)
   @Post('update')
   @ApiBody({
-    type: CreateUserDto,
+    type: UpdateUserDto,
     description: 'Data required to update an existing user',
   })
   @ApiOperation({ description: 'Update a user' })
@@ -43,14 +48,14 @@ export class UserController {
     unauthorizedResponse: 'User is not authenticated',
     internalServerErrorResponse: 'An internal server error occurred',
   })
-  async update(@Body() data: CreateUserDto) {
+  async update(@Body() data: UpdateUserDto) {
     return this.userService.update(data);
   }
 
   @HttpCode(200)
   @Post('delete')
   @ApiBody({
-    type: CreateUserDto,
+    type: DeleteUserDto,
     description: 'Data required to delete a user',
   })
   @ApiOperation({ description: 'Delete a user' })
@@ -60,14 +65,14 @@ export class UserController {
     unauthorizedResponse: 'User is not authenticated',
     internalServerErrorResponse: 'An internal server error occurred',
   })
-  async delete(@Body() data: CreateUserDto) {
+  async delete(@Body() data: DeleteUserDto) {
     return this.userService.delete(data);
   }
 
   @HttpCode(200)
   @Post('get-one')
   @ApiBody({
-    type: CreateUserDto,
+    type: getOneUserDto,
     description: 'Data required to retrieve a specific user',
   })
   @ApiOperation({ description: 'Get one user' })
@@ -77,7 +82,7 @@ export class UserController {
     unauthorizedResponse: 'User is not authenticated',
     internalServerErrorResponse: 'An internal server error occurred',
   })
-  async getById(@Body() data: CreateUserDto) {
+  async getById(@Body() data: getOneUserDto) {
     return this.userService.getById(data);
   }
 
@@ -113,7 +118,25 @@ export class UserController {
     unauthorizedResponse: 'User is not authenticated',
     internalServerErrorResponse: 'An internal server error occurred',
   })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
   async getByEmail(@Body() data: getUserByEmailDto) {
     return this.userService.getByEmail(data);
+  }
+
+  @HttpCode(200)
+  @Post('login')
+  @ApiBody({
+    type: LoginDto,
+    description: 'User login credentials',
+  })
+  @ApiOperation({ description: 'Login and get JWT token' })
+  @ApiResponses({
+    okResponse: 'Login successful, JWT token returned',
+    badRequestResponse: 'Invalid credentials',
+    internalServerErrorResponse: 'An internal server error occurred',
+  })
+  async login(@Body() data: LoginDto) {
+    return this.userService.login(data);
   }
 }

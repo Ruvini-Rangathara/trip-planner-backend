@@ -24,14 +24,18 @@ async function bootstrap() {
 
   /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   const config = new DocumentBuilder()
-    .setTitle('CEYLON GUIDE BACKEND')
-    .setDescription('API for Ceylon Guide Backend')
+    .setTitle('Ceylon Guide API')
+    .setDescription('API documentation for the Ceylon Guide')
     .setVersion('1.0')
-    .setExternalDoc('Postman Collection', '/docs-json')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup(GLOBAL_PREFIX + '/docs', app, document);
+  SwaggerModule.setup('api', app, document);
+  SwaggerModule.setup(`${GLOBAL_PREFIX}/docs`, app, document);
   /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 
   const port = process.env.PORT ?? 9062;
