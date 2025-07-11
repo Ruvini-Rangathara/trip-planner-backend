@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
@@ -15,96 +9,143 @@ datasource db {
   extensions = [pgcrypto]
 }
 
-model User {
-  user_id            String        @id @default(uuid())
-  name               String
-  email              String        @unique
-  password           String
-  travel_type        String?       // e.g., leisure, adventure, family
-  climate_preference String?       // e.g., warm, cool, avoid rain
+enum TravelType {
+  LEISURE
+  ADVENTURE
+  FAMILY
+  CULTURAL
+  ROMANTIC
+}
 
-  tripPlans          TripPlan[]
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+enum ClimatePreference {
+  WARM
+  COOL
+  AVOID_RAIN
+  NO_PREFERENCE
+}
+
+enum TripStatus {
+  SUGGESTED
+  ACCEPTED
+  REJECTED
+  COMPLETED
+}
+
+enum SuggestionStatus {
+  PENDING
+  REJECTED
+  ACCEPTED
+}
+
+enum ClimateType {
+  DRY
+  WET
+  MODERATE
+}
+
+enum RescheduleReason {
+  RAIN
+  FLOOD
+  STORM
+  LANDSLIDE
+  OTHER
+}
+
+model User {
+  id                String           @id @default(uuid())
+  name              String
+  email             String           @unique
+  password          String
+  travelType        TravelType?
+  climatePreference ClimatePreference?
+  tripPlans         TripPlan[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  deletedAt         DateTime?
 }
 
 model TripPlan {
-  trip_id      String            @id @default(uuid())
-  user_id      String
-  start_date   DateTime
-  end_date     DateTime
-  status       String            // suggested, accepted, rejected, completed
-  created_at   DateTime          @default(now())
+  id          String               @id @default(uuid())
+  userId      String
+  startDate   DateTime
+  endDate     DateTime
+  status      TripStatus
 
-  user         User              @relation(fields: [user_id], references: [user_id])
-  suggestions  TripSuggestion[]
-  itinerary    ItineraryItem[]
-  reschedules  RealTimeReschedule[]
-  feedback     Feedback?
+  user        User                 @relation(fields: [userId], references: [id])
+  suggestions TripSuggestion[]
+  itinerary   ItineraryItem[]
+  reschedules RealTimeReschedule[]
+  feedback    Feedback?
+  createdAt   DateTime             @default(now())
+  deletedAt   DateTime?
 }
 
 model TripSuggestion {
-  suggestion_id     String   @id @default(uuid())
-  trip_id           String
-  suggestion_number Int
-  generated_at      DateTime @default(now())
-  status            String   // pending, rejected, accepted
+  id               String           @id @default(uuid())
+  tripId           String
+  suggestionNumber Int
+  generatedAt      DateTime         @default(now())
+  status           SuggestionStatus
 
-  trip              TripPlan @relation(fields: [trip_id], references: [trip_id])
+  trip             TripPlan         @relation(fields: [tripId], references: [id])
+  createdAt        DateTime         @default(now())
 }
 
 model Region {
-  region_id String       @id @default(uuid())
-  name      String
-
+  id           String        @id @default(uuid())
+  name         String
   destinations Destination[]
 }
 
 model Destination {
-  destination_id String   @id @default(uuid())
+  id             String                @id @default(uuid())
   name           String
-  region_id      String
-  climate_type   String   // dry, wet, moderate
+  regionId       String
+  climateType    ClimateType
   latitude       Float
   longitude      Float
 
-  region         Region   @relation(fields: [region_id], references: [region_id])
+  region         Region                @relation(fields: [regionId], references: [id])
   itineraryItems ItineraryItem[]
   oldReschedules RealTimeReschedule[] @relation("OldDestination")
   newReschedules RealTimeReschedule[] @relation("NewDestination")
 }
 
 model ItineraryItem {
-  item_id            String      @id @default(uuid())
-  trip_id            String
-  destination_id     String
-  day_number         Int
-  activity_time      String
-  activity_description String
+  id                  String      @id @default(uuid())
+  tripId              String
+  destinationId       String
+  dayNumber           Int
+  activityTime        String
+  activityDescription String
 
-  trip               TripPlan    @relation(fields: [trip_id], references: [trip_id])
-  destination        Destination @relation(fields: [destination_id], references: [destination_id])
+  trip        TripPlan    @relation(fields: [tripId], references: [id])
+  destination Destination @relation(fields: [destinationId], references: [id])
 }
 
 model RealTimeReschedule {
-  reschedule_id       String      @id @default(uuid())
-  trip_id             String
-  old_destination_id  String
-  new_destination_id  String
-  reason              String
-  rescheduled_at      DateTime    @default(now())
+  id               String           @id @default(uuid())
+  tripId           String
+  oldDestinationId String
+  newDestinationId String
+  reason           RescheduleReason
+  rescheduledAt    DateTime         @default(now())
 
-  trip                TripPlan    @relation(fields: [trip_id], references: [trip_id])
-  old_destination     Destination @relation("OldDestination", fields: [old_destination_id], references: [destination_id])
-  new_destination     Destination @relation("NewDestination", fields: [new_destination_id], references: [destination_id])
+  trip           TripPlan    @relation(fields: [tripId], references: [id])
+  oldDestination Destination @relation("OldDestination", fields: [oldDestinationId], references: [id])
+  newDestination Destination @relation("NewDestination", fields: [newDestinationId], references: [id])
+  createdAt       DateTime         @default(now())
+  deletedAt       DateTime?
 }
 
 model Feedback {
-  feedback_id   String    @id @default(uuid())
-  trip_id       String    @unique
-  rating        Int
-  comments      String?
-  submitted_at  DateTime  @default(now())
+  id          String   @id @default(uuid())
+  tripId      String   @unique
+  rating      Int
+  comments    String?
+  submittedAt DateTime @default(now())
 
-  trip          TripPlan  @relation(fields: [trip_id], references: [trip_id])
+  trip TripPlan @relation(fields: [tripId], references: [id])
+  createdAt DateTime @default(now())
+  deletedAt DateTime?
 }

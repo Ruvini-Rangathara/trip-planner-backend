@@ -1,0 +1,16 @@
+-- AlterTable
+ALTER TABLE "Feedback" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "deletedAt" TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "RealTimeReschedule" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "deletedAt" TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "TripPlan" ADD COLUMN     "deletedAt" TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "TripSuggestion" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "deletedAt" TIMESTAMP(3);
