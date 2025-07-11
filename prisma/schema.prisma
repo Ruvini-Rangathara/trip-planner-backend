@@ -1,0 +1,110 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto]
+}
+
+model User {
+  user_id            String        @id @default(uuid())
+  name               String
+  email              String        @unique
+  password           String
+  travel_type        String?       // e.g., leisure, adventure, family
+  climate_preference String?       // e.g., warm, cool, avoid rain
+
+  tripPlans          TripPlan[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+model TripPlan {
+  trip_id      String            @id @default(uuid())
+  user_id      String
+  start_date   DateTime
+  end_date     DateTime
+  status       String            // suggested, accepted, rejected, completed
+  created_at   DateTime          @default(now())
+
+  user         User              @relation(fields: [user_id], references: [user_id])
+  suggestions  TripSuggestion[]
+  itinerary    ItineraryItem[]
+  reschedules  RealTimeReschedule[]
+  feedback     Feedback?
+}
+
+model TripSuggestion {
+  suggestion_id     String   @id @default(uuid())
+  trip_id           String
+  suggestion_number Int
+  generated_at      DateTime @default(now())
+  status            String   // pending, rejected, accepted
+
+  trip              TripPlan @relation(fields: [trip_id], references: [trip_id])
+}
+
+model Region {
+  region_id String       @id @default(uuid())
+  name      String
+
+  destinations Destination[]
+}
+
+model Destination {
+  destination_id String   @id @default(uuid())
+  name           String
+  region_id      String
+  climate_type   String   // dry, wet, moderate
+  latitude       Float
+  longitude      Float
+
+  region         Region   @relation(fields: [region_id], references: [region_id])
+  itineraryItems ItineraryItem[]
+  oldReschedules RealTimeReschedule[] @relation("OldDestination")
+  newReschedules RealTimeReschedule[] @relation("NewDestination")
+}
+
+model ItineraryItem {
+  item_id            String      @id @default(uuid())
+  trip_id            String
+  destination_id     String
+  day_number         Int
+  activity_time      String
+  activity_description String
+
+  trip               TripPlan    @relation(fields: [trip_id], references: [trip_id])
+  destination        Destination @relation(fields: [destination_id], references: [destination_id])
+}
+
+model RealTimeReschedule {
+  reschedule_id       String      @id @default(uuid())
+  trip_id             String
+  old_destination_id  String
+  new_destination_id  String
+  reason              String
+  rescheduled_at      DateTime    @default(now())
+
+  trip                TripPlan    @relation(fields: [trip_id], references: [trip_id])
+  old_destination     Destination @relation("OldDestination", fields: [old_destination_id], references: [destination_id])
+  new_destination     Destination @relation("NewDestination", fields: [new_destination_id], references: [destination_id])
+}
+
+model Feedback {
+  feedback_id   String    @id @default(uuid())
+  trip_id       String    @unique
+  rating        Int
+  comments      String?
+  submitted_at  DateTime  @default(now())
+
+  trip          TripPlan  @relation(fields: [trip_id], references: [trip_id])
+}
