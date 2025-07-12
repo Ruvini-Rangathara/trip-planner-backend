@@ -14,6 +14,7 @@ import {
 import PrismaUtil from 'src/common/util/PrismaUtil';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
+import { ExceptionFactory } from 'src/common/exception/exception.factory';
 
 @Injectable()
 export class UserService {
@@ -27,6 +28,15 @@ export class UserService {
   async create(data: CreateUserDto): Promise<UserDto> {
     this.logger.log('Creating a new user');
     try {
+      // Check if user already exists
+      const existingUser = await this.prisma.user.findUnique({
+        where: { email: data.email },
+      });
+      if (existingUser) {
+        this.logger.error('User already exists');
+        throw ExceptionFactory.user('USER_ALREADY_EXISTS');
+      }
+
       // Hash the password
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(data.password, saltRounds);
@@ -44,13 +54,22 @@ export class UserService {
       return new UserDto(user);
     } catch (error) {
       this.logger.error('Error creating user', error);
-      throw error;
+      throw ExceptionFactory.user('USER_CREATION_FAILED', error);
     }
   }
 
   async update(data: UpdateUserDto): Promise<UserDto> {
     this.logger.log(`Updating user with ID: ${data.id}`);
     try {
+      // Check if user exists
+      const existingUser = await this.prisma.user.findUnique({
+        where: { id: data.id },
+      });
+      if (!existingUser) {
+        this.logger.error('User not found');
+        throw ExceptionFactory.user('USER_NOT_FOUND');
+      }
+
       const user = await this.prisma.user.update({
         where: { id: data.id },
         data: {
@@ -64,13 +83,22 @@ export class UserService {
       return new UserDto(user);
     } catch (error) {
       this.logger.error('Error updating user', error);
-      throw error;
+      throw ExceptionFactory.user('USER_UPDATE_FAILED', error);
     }
   }
 
   async delete(data: DeleteUserDto): Promise<void> {
     this.logger.log(`Deleting user with ID: ${data.id}`);
     try {
+      // Check if user exists
+      const existingUser = await this.prisma.user.findUnique({
+        where: { id: data.id },
+      });
+      if (!existingUser) {
+        this.logger.error('User not found');
+        throw ExceptionFactory.user('USER_NOT_FOUND');
+      }
+
       await this.prisma.user.update({
         where: { id: data.id },
         data: { deletedAt: new Date() },
@@ -78,20 +106,24 @@ export class UserService {
       this.logger.log('User deleted successfully');
     } catch (error) {
       this.logger.error('Error deleting user', error);
-      throw error;
+      throw ExceptionFactory.user('USER_DELETION_FAILED', error);
     }
   }
 
-  async getById(data: getOneUserDto): Promise<UserDto | null> {
+  async getById(data: getOneUserDto): Promise<UserDto> {
     this.logger.log(`Finding user by ID: ${data.id}`);
     try {
       const user = await this.prisma.user.findUnique({
         where: { id: data.id },
       });
-      return user ? new UserDto(user) : null;
+      if (!user) {
+        this.logger.error('User not found');
+        throw ExceptionFactory.user('USER_NOT_FOUND');
+      }
+      return new UserDto(user);
     } catch (error) {
       this.logger.error('Error finding user by ID', error);
-      throw error;
+      throw ExceptionFactory.user('USER_NOT_FOUND', error);
     }
   }
 
@@ -102,12 +134,12 @@ export class UserService {
         where: { email: data.email },
       });
       if (!user) {
-        throw new Error('User not found');
+        throw ExceptionFactory.user('USER_NOT_FOUND');
       }
       return new UserDto(user);
     } catch (error) {
       this.logger.error('Error finding user by email', error);
-      throw error;
+      throw ExceptionFactory.user('USER_NOT_FOUND', error);
     }
   }
 
@@ -134,20 +166,20 @@ export class UserService {
       );
     } catch (error) {
       this.logger.error('Error retrieving all users', error);
-      throw error;
+      throw ExceptionFactory.user('USER_NOT_FOUND', error);
     }
   }
 
   async login(data: LoginDto): Promise<{ access_token: string }> {
     const user = await this.getByEmail({ email: data.email });
     if (!user) {
-      throw new Error('User not found');
+      throw ExceptionFactory.user('USER_NOT_FOUND');
     }
 
     const isPasswordValid = await bcrypt.compare(data.password, user.password);
 
     if (!isPasswordValid) {
-      throw new Error('Invalid password');
+      throw ExceptionFactory.user('PASSWORD_MISMATCH');
     }
 
     const payload = { sub: user.id, email: user.email };

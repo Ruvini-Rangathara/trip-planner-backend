@@ -22,8 +22,4 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   providers: [JwtStrategy],
   exports: [JwtModule, PassportModule],
 })
-export class AuthModule {
-  constructor() {
-    console.log('AuthModule constructed');
-  }
-}
+export class AuthModule {}
