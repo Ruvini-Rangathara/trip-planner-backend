@@ -46,8 +46,6 @@ export class UserService {
           name: data.name,
           email: data.email,
           password: hashedPassword,
-          travelType: data?.travelType,
-          climatePreference: data?.climatePreference,
         },
       });
       this.logger.log('User created successfully');

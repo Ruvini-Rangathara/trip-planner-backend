@@ -7,7 +7,7 @@ import cors from './cors.js';
 import { DocumentBuilder } from '@nestjs/swagger';
 import { SwaggerModule } from '@nestjs/swagger';
 
-export const GLOBAL_PREFIX = '/ceylon-guide';
+export const GLOBAL_PREFIX = '/ceylon-guide/api/';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
