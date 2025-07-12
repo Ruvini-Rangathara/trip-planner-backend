@@ -13,11 +13,13 @@ import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { DeleteUserDto } from './dto/delete-user.dto';
 import { LoginDto } from './dto/login.dto';
+import { Public } from '../common/decorator/public.decorator';
 
 @Controller('user')
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
+  @Public()
   @HttpCode(200)
   @Post('create')
   @ApiBody({
@@ -124,6 +126,7 @@ export class UserController {
     return this.userService.getByEmail(data);
   }
 
+  @Public()
   @HttpCode(200)
   @Post('login')
   @ApiBody({
