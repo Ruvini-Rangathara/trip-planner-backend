@@ -14,7 +14,6 @@ enum TravelType {
   ADVENTURE
   FAMILY
   CULTURAL
-  ROMANTIC
 }
 
 enum ClimatePreference {
@@ -25,127 +24,65 @@ enum ClimatePreference {
 }
 
 enum TripStatus {
-  SUGGESTED
-  ACCEPTED
-  REJECTED
+  PLANNED
+  ONGOING
   COMPLETED
 }
 
-enum SuggestionStatus {
-  PENDING
-  REJECTED
-  ACCEPTED
-}
-
-enum ClimateType {
-  DRY
-  WET
-  MODERATE
-}
-
-enum RescheduleReason {
-  RAIN
-  FLOOD
-  STORM
-  LANDSLIDE
-  OTHER
+enum AlertType {
+  DUE_DATE
+  WEATHER
+  SUGGESTION
 }
 
 model User {
-  id                String           @id @default(uuid())
+  id                String             @id @default(uuid())
   name              String
-  email             String           @unique
+  email             String             @unique
   password          String
   travelType        TravelType?
   climatePreference ClimatePreference?
   tripPlans         TripPlan[]
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   deletedAt         DateTime?
 }
 
+model Area {
+  id        String     @id @default(uuid())
+  name      String
+  district  String?
+  isIndoor  Boolean    @default(false)
+  latitude  Float
+  longitude Float
+  trips     TripArea[]
+}
+
 model TripPlan {
-  id          String               @id @default(uuid())
-  userId      String
-  startDate   DateTime
-  endDate     DateTime
-  status      TripStatus
-
-  user        User                 @relation(fields: [userId], references: [id])
-  suggestions TripSuggestion[]
-  itinerary   ItineraryItem[]
-  reschedules RealTimeReschedule[]
-  feedback    Feedback?
-  createdAt   DateTime             @default(now())
-  deletedAt   DateTime?
+  id        String     @id @default(uuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id])
+  title     String
+  status    TripStatus @default(PLANNED)
+  startDate DateTime
+  endDate   DateTime
+  areas     TripArea[]
+  alerts    Alert[]
 }
 
-model TripSuggestion {
-  id               String           @id @default(uuid())
-  tripId           String
-  suggestionNumber Int
-  generatedAt      DateTime         @default(now())
-  status           SuggestionStatus
-
-  trip             TripPlan         @relation(fields: [tripId], references: [id])
-  createdAt        DateTime         @default(now())
+model TripArea {
+  id     String   @id @default(uuid())
+  tripId String
+  trip   TripPlan @relation(fields: [tripId], references: [id])
+  areaId String
+  area   Area     @relation(fields: [areaId], references: [id])
 }
 
-model Region {
-  id           String        @id @default(uuid())
-  name         String
-  destinations Destination[]
-}
-
-model Destination {
-  id             String                @id @default(uuid())
-  name           String
-  regionId       String
-  climateType    ClimateType
-  latitude       Float
-  longitude      Float
-
-  region         Region                @relation(fields: [regionId], references: [id])
-  itineraryItems ItineraryItem[]
-  oldReschedules RealTimeReschedule[] @relation("OldDestination")
-  newReschedules RealTimeReschedule[] @relation("NewDestination")
-}
-
-model ItineraryItem {
-  id                  String      @id @default(uuid())
-  tripId              String
-  destinationId       String
-  dayNumber           Int
-  activityTime        String
-  activityDescription String
-
-  trip        TripPlan    @relation(fields: [tripId], references: [id])
-  destination Destination @relation(fields: [destinationId], references: [id])
-}
-
-model RealTimeReschedule {
-  id               String           @id @default(uuid())
-  tripId           String
-  oldDestinationId String
-  newDestinationId String
-  reason           RescheduleReason
-  rescheduledAt    DateTime         @default(now())
-
-  trip           TripPlan    @relation(fields: [tripId], references: [id])
-  oldDestination Destination @relation("OldDestination", fields: [oldDestinationId], references: [id])
-  newDestination Destination @relation("NewDestination", fields: [newDestinationId], references: [id])
-  createdAt       DateTime         @default(now())
-  deletedAt       DateTime?
-}
-
-model Feedback {
-  id          String   @id @default(uuid())
-  tripId      String   @unique
-  rating      Int
-  comments    String?
-  submittedAt DateTime @default(now())
-
-  trip TripPlan @relation(fields: [tripId], references: [id])
-  createdAt DateTime @default(now())
-  deletedAt DateTime?
+model Alert {
+  id        String    @id @default(uuid())
+  tripId    String
+  trip      TripPlan  @relation(fields: [tripId], references: [id])
+  type      AlertType
+  message   String
+  createdAt DateTime  @default(now())
 }
