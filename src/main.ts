@@ -19,10 +19,8 @@ async function bootstrap() {
     exclude: ['/', 'docs', '/health'],
   });
   app.enableCors(cors);
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
   app.useLogger(app.get(PinoLogger));
 
-  /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
   const config = new DocumentBuilder()
     .setTitle('Ceylon Guide API')
     .setDescription('API documentation for the Ceylon Guide')
@@ -34,9 +32,7 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
-  SwaggerModule.setup(`${GLOBAL_PREFIX}/docs`, app, document);
-  /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+  SwaggerModule.setup('/docs', app, document);
 
   const port = process.env.PORT ?? 9062;
   await app.listen(port).then(() => {

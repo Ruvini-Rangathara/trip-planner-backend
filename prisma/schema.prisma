@@ -56,6 +56,9 @@ model Area {
   latitude  Float
   longitude Float
   trips     TripArea[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
 }
 
 model TripPlan {
@@ -68,6 +71,9 @@ model TripPlan {
   endDate   DateTime
   areas     TripArea[]
   alerts    Alert[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
 }
 
 model TripArea {
@@ -76,6 +82,9 @@ model TripArea {
   trip   TripPlan @relation(fields: [tripId], references: [id])
   areaId String
   area   Area     @relation(fields: [areaId], references: [id])
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
 }
 
 model Alert {
@@ -85,4 +94,6 @@ model Alert {
   type      AlertType
   message   String
   createdAt DateTime  @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
 }

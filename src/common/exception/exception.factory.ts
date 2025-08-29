@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { UserException } from './constants/user-exception.enum';
+import { AreaException } from './constants/area-exception.enum';
 
 export type ErrorFormat = {
   code: number;
@@ -26,5 +27,8 @@ export class ExceptionFactory extends HttpException {
   }
   static user(errorCode: keyof typeof UserException, cause?: any) {
     return new ExceptionFactory(UserException[errorCode], cause);
+  }
+  static area(errorCode: keyof typeof AreaException, cause?: any) {
+    return new ExceptionFactory(AreaException[errorCode], cause);
   }
 }

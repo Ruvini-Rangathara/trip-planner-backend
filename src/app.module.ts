@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
 import { LoggerModule } from 'nestjs-pino';
+import { AreaModule } from './area/area.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { LoggerModule } from 'nestjs-pino';
     UserModule,
     AuthModule,
     LoggerModule.forRoot(),
+    AreaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
