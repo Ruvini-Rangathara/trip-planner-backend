@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { LoggerModule } from 'nestjs-pino';
 import { AreaModule } from './area/area.module';
 import { AlertModule } from './alert/alert.module';
+import { WeatherModule } from './weather/weather.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AlertModule } from './alert/alert.module';
     LoggerModule.forRoot(),
     AreaModule,
     AlertModule,
+    WeatherModule,
   ],
   controllers: [AppController],
   providers: [AppService],
