@@ -48,19 +48,6 @@ model User {
   deletedAt         DateTime?
 }
 
-model Area {
-  id        String     @id @default(uuid())
-  name      String
-  district  String?
-  isIndoor  Boolean    @default(false)
-  latitude  Float
-  longitude Float
-  trips     TripArea[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  deletedAt         DateTime?
-}
-
 model TripPlan {
   id        String     @id @default(uuid())
   userId    String
@@ -71,20 +58,21 @@ model TripPlan {
   endDate   DateTime
   areas     TripArea[]
   alerts    Alert[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  deletedAt         DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
 }
 
 model TripArea {
-  id     String   @id @default(uuid())
-  tripId String
-  trip   TripPlan @relation(fields: [tripId], references: [id])
-  areaId String
-  area   Area     @relation(fields: [areaId], references: [id])
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  deletedAt         DateTime?
+  id        String    @id @default(uuid())
+  tripId    String
+  trip      TripPlan  @relation(fields: [tripId], references: [id])
+  area      String
+  longitude Float
+  latitude  Float
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 }
 
 model Alert {
@@ -94,6 +82,6 @@ model Alert {
   type      AlertType
   message   String
   createdAt DateTime  @default(now())
-  updatedAt         DateTime           @updatedAt
-  deletedAt         DateTime?
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 }
