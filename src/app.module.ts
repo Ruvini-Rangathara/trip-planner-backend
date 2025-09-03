@@ -8,6 +8,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { AlertModule } from './alert/alert.module';
 import { WeatherModule } from './weather/weather.module';
 import { PlacesModule } from './places/places.module';
+import { TripPlanModule } from './trip-plan/trip-plan.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PlacesModule } from './places/places.module';
     AlertModule,
     WeatherModule,
     PlacesModule,
+    TripPlanModule,
   ],
   controllers: [AppController],
   providers: [AppService],
