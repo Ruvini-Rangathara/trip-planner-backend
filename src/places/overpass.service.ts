@@ -1,8 +1,13 @@
+// src/places/overpass.service.ts
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
+import type { AxiosError } from 'axios';
+import * as https from 'https';
+import type { Agent as HttpsAgent } from 'https';
 
+/** ---------------- Types ---------------- */
 export type OsmElementType = 'node' | 'way' | 'relation';
 
 export interface OsmElement {
@@ -31,6 +36,15 @@ export interface Place {
   tags: Record<string, string>;
 }
 
+/** Axios error type guard (no-unsafe access safe) */
+function isAxiosError<T = unknown>(err: unknown): err is AxiosError<T> {
+  return (
+    !!err &&
+    typeof err === 'object' &&
+    (err as AxiosError).isAxiosError === true
+  );
+}
+
 @Injectable()
 export class OverpassService {
   constructor(
@@ -38,14 +52,50 @@ export class OverpassService {
     private cfg: ConfigService,
   ) {}
 
+  /** Primary base (kept for backwards-compat) */
   private base(): string {
     return (
       this.cfg.get<string>('OVERPASS_BASE') ??
       'https://overpass-api.de/api/interpreter'
     );
   }
+
+  /** Failover mirror list (first reachable used) */
+  private bases(): string[] {
+    const env = this.cfg.get<string>('OVERPASS_BASES');
+    if (env && env.split(',').filter(Boolean).length) {
+      return env
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    // sensible defaults
+    return [
+      'https://overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+      'https://overpass.openstreetmap.ru/api/interpreter',
+      'https://overpass.osm.ch/api/interpreter',
+      'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    ];
+  }
+
+  private timeoutMs(): number {
+    const raw = this.cfg.get<string>('OVERPASS_TIMEOUT_MS');
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 20000;
+  }
+
+  private radiusMax(): number {
+    const raw = this.cfg.get<string>('OVERPASS_RADIUS_MAX');
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 30000;
+  }
+
   private ua(): string {
-    return this.cfg.get<string>('OVERPASS_USER_AGENT') ?? 'villagecast/1.0';
+    return (
+      this.cfg.get<string>('OVERPASS_USER_AGENT') ??
+      'trip-planner/1.0 (mailto:you@example.com)'
+    );
   }
 
   /** Build Overpass QL for nearby “travel areas” (POIs) */
@@ -69,7 +119,6 @@ export class OverpassService {
       `);
     }
     if (includeNatural) {
-      // common nature spots people visit
       parts.push(`
         node(around:${radius},${lat},${lon})[natural~"beach|waterfall|peak|cliff|cave_entrance|spring|geyser|moor|dune|wetland"];
         way(around:${radius},${lat},${lon})[natural~"beach|waterfall|peak|cliff|cave_entrance|spring|geyser|moor|dune|wetland"];
@@ -138,13 +187,63 @@ export class OverpassService {
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
+  /** Core: post to Overpass with mirror failover & safe error handling */
+  private async postOverpassWithFailover(
+    ql: string,
+  ): Promise<OverpassResponse> {
+    const mirrors = this.bases();
+    const timeout = this.timeoutMs();
+
+    // Prefer IPv4 when possible, but be defensive if https.Agent is unavailable
+    const httpsAgent: HttpsAgent | undefined =
+      typeof (
+        https as unknown as { Agent?: new (...args: any[]) => HttpsAgent }
+      ).Agent === 'function'
+        ? new https.Agent({ family: 4 })
+        : undefined;
+
+    let lastErrMsg = 'Unknown error contacting Overpass';
+
+    for (const base of mirrors) {
+      try {
+        const { data } = await firstValueFrom(
+          this.http.post<OverpassResponse>(base, ql, {
+            headers: {
+              'Content-Type': 'text/plain; charset=UTF-8',
+              'User-Agent': this.ua(),
+            },
+            timeout,
+            maxRedirects: 5,
+            ...(httpsAgent ? { httpsAgent } : {}),
+          }),
+        );
+        return data;
+      } catch (err: unknown) {
+        if (isAxiosError(err)) {
+          const code = err.code ?? '';
+          const status = err.response?.status;
+          const msg = err.message ?? '';
+          lastErrMsg = `Overpass '${base}' failed${status ? ` (HTTP ${status})` : code ? ` [${code}]` : ''}${msg ? `: ${msg}` : ''}`;
+        } else if (err instanceof Error) {
+          lastErrMsg = `Overpass '${base}' failed: ${err.message}`;
+        } else {
+          lastErrMsg = `Overpass '${base}' failed`;
+        }
+        // continue to the next mirror
+      }
+    }
+
+    throw new Error(lastErrMsg);
+  }
+
+  /** Public API: find nearby travel POIs (with categories) */
   async nearbyTravelPlaces(
     lat: number,
     lon: number,
     radius = 30000,
     kindsCsv?: string,
   ): Promise<Place[]> {
-    const r = Math.max(100, Math.min(radius, 50000)); // 100m..50km
+    const r = Math.max(100, Math.min(radius, this.radiusMax())); // clamp 100m..radiusMax
     const kinds = new Set(
       (kindsCsv ?? 'tourism,natural,historic,park')
         .split(',')
@@ -153,20 +252,15 @@ export class OverpassService {
     );
 
     const ql = this.buildQuery(lat, lon, r, { kinds });
-    const { data } = await firstValueFrom(
-      this.http.post<OverpassResponse>(this.base(), ql, {
-        headers: {
-          'Content-Type': 'text/plain; charset=UTF-8',
-          'User-Agent': this.ua(),
-        },
-      }),
-    );
+    const data = await this.postOverpassWithFailover(ql);
 
     const out: Place[] = [];
     for (const el of data.elements ?? []) {
       const c =
         el.type === 'node'
-          ? { lat: el.lat!, lon: el.lon! }
+          ? el.lat != null && el.lon != null
+            ? { lat: el.lat, lon: el.lon }
+            : null
           : (el.center ?? null);
       if (!c) continue;
 
@@ -187,6 +281,7 @@ export class OverpassService {
         tags: el.tags ?? {},
       });
     }
+
     // sort by distance and de-dup by id
     const uniq = new Map<string, Place>();
     for (const p of out.sort((a, b) => a.distance_m - b.distance_m)) {

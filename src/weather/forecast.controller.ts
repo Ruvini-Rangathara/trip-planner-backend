@@ -99,7 +99,7 @@ function validate<T>(cls: new () => T, obj: Record<string, unknown>): T {
   ForecastWindow,
   LatLon,
 )
-@Controller('api')
+@Controller('weather')
 export class ForecastController {
   constructor(
     private fc: ForecastService,

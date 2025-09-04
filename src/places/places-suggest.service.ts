@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+// src/places/places-suggest.service.ts
+import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
+import { ConfigService } from '@nestjs/config';
 import { OverpassService, Place } from './overpass.service';
 
 type Activity = 'beach' | 'hike' | 'city';
@@ -17,6 +19,7 @@ interface ForecastEnvelope {
   data: { daily: ForecastRow[] };
 }
 
+/** Map category -> broad activity bucket */
 const activityFromCategory = (cat: string): Activity => {
   const c = (cat || '').toLowerCase();
   if (c.includes('beach')) return 'beach';
@@ -34,6 +37,7 @@ const activityFromCategory = (cat: string): Activity => {
 const inRange = (d: string, start?: string, end?: string) =>
   (!start || d >= start) && (!end || d <= end);
 
+/** Score a day (higher is better) */
 const scoreDay = (t?: number, r?: number): number => {
   if (t == null || r == null) return -1;
   let s = 0;
@@ -46,23 +50,108 @@ const scoreDay = (t?: number, r?: number): number => {
   return s;
 };
 
+/** Minimal concurrency limiter (no external deps) */
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length) as R[];
+  let next = 0;
+
+  async function run(): Promise<void> {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await worker(items[i], i);
+    }
+  }
+
+  const n = Math.max(1, Math.min(limit, items.length));
+  await Promise.all(Array.from({ length: n }, run));
+  return out;
+}
+
 @Injectable()
 export class PlacesSuggestService {
-  private flaskBase = process.env.FLASK_BASE ?? 'http://127.0.0.1:8000';
+  private readonly log = new Logger(PlacesSuggestService.name);
+
+  private readonly flaskBase: string;
+  private readonly flaskTimeoutMs: number;
+  private readonly flaskRetries: number;
+  private readonly flaskBackoffMs: number;
+
+  // “Hard safety” limits – configurable (more forgiving defaults)
+  private readonly beachMaxRainHi: number;
+  private readonly hikeMaxRainHi: number;
+  private readonly maxTHiAll: number;
+
+  // Min “good days” gate – configurable
+  private readonly minGoodDaysDefault: number;
 
   constructor(
-    private http: HttpService,
-    private overpass: OverpassService,
-  ) {}
+    private readonly http: HttpService,
+    private readonly overpass: OverpassService,
+    private readonly cfg: ConfigService,
+  ) {
+    this.flaskBase =
+      this.cfg.get<string>('FLASK_BASE') ?? 'http://127.0.0.1:8000';
+    this.flaskTimeoutMs = this.num(
+      this.cfg.get<string>('FLASK_TIMEOUT_MS'),
+      45_000,
+    );
+    this.flaskRetries = this.num(this.cfg.get<string>('FLASK_RETRIES'), 2);
+    this.flaskBackoffMs = this.num(
+      this.cfg.get<string>('FLASK_RETRY_BACKOFF_MS'),
+      800,
+    );
+
+    this.beachMaxRainHi = this.num(
+      this.cfg.get<string>('SUGGEST_BEACH_MAX_RAIN_HI'),
+      25,
+    );
+    this.hikeMaxRainHi = this.num(
+      this.cfg.get<string>('SUGGEST_HIKE_MAX_RAIN_HI'),
+      30,
+    );
+    this.maxTHiAll = this.num(this.cfg.get<string>('SUGGEST_MAX_T_HI'), 38);
+    this.minGoodDaysDefault = this.num(
+      this.cfg.get<string>('SUGGEST_MIN_GOOD_DAYS'),
+      1,
+    );
+  }
+
+  private num(v: unknown, fallback: number): number {
+    const n = typeof v === 'string' ? Number(v) : (v as number);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+  }
+
+  private async withRetry<T>(op: () => Promise<T>): Promise<T> {
+    let last: unknown;
+    for (let a = 0; a <= this.flaskRetries; a++) {
+      try {
+        return await op();
+      } catch (e) {
+        last = e;
+        if (a === this.flaskRetries) break;
+        const wait = this.flaskBackoffMs * Math.pow(2, a);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    throw last;
+  }
 
   private async forecast(lat: number, lon: number): Promise<ForecastRow[]> {
-    const { data } = await firstValueFrom(
-      this.http.get<ForecastEnvelope>(`${this.flaskBase}/forecast`, {
-        params: { lat, lon, interp: '1', vars: 'T2M,PRECIP' },
-        timeout: 15000,
-      }),
+    const url = `${this.flaskBase}/forecast`;
+    const { data } = await this.withRetry(() =>
+      firstValueFrom(
+        this.http.get<ForecastEnvelope>(url, {
+          params: { lat, lon, interp: '1', vars: 'T2M,PRECIP' },
+          timeout: this.flaskTimeoutMs,
+        }),
+      ),
     );
-    return data.data.daily;
+    return data?.data?.daily ?? [];
   }
 
   /** Main entry */
@@ -88,12 +177,10 @@ export class PlacesSuggestService {
     const maxCheck = Math.max(5, Math.min(opts.limit ?? 40, 120));
     const batch = places.slice(0, maxCheck);
 
-    // 3) Forecast each place (simple concurrency: 8 at a time)
-    const chunks: Place[][] = [];
-    for (let i = 0; i < batch.length; i += 8)
-      chunks.push(batch.slice(i, i + 8));
+    // 3) Forecast each place (controlled concurrency)
+    const rejected = { byWeather: 0, byGoodDays: 0, byEmpty: 0, byError: 0 };
 
-    const results: Array<{
+    type Row = {
       place: Place;
       activity: Activity;
       score: number;
@@ -105,37 +192,52 @@ export class PlacesSuggestService {
         maxRainHi: number;
         maxTHi: number;
       };
-    }> = [];
+    } | null;
 
-    for (const group of chunks) {
-      const promises = group.map(async (p) => {
-        const daily = (await this.forecast(p.lat, p.lon)).filter((d) =>
+    const minGoodDays = opts.minGoodDays ?? this.minGoodDaysDefault;
+
+    const computed = await mapWithLimit(batch, 6, async (p): Promise<Row> => {
+      try {
+        const dailyRaw = await this.forecast(p.lat, p.lon);
+        const daily = dailyRaw.filter((d) =>
           inRange(d.date, opts.start, opts.end),
         );
-        if (!daily.length) return;
+        if (!daily.length) {
+          rejected.byEmpty++;
+          return null;
+        }
 
-        // Hard safety filters by activity
         const activity = activityFromCategory(p.category);
         const maxRainHi = Math.max(...daily.map((d) => d.precip_hi ?? 0));
         const maxTHi = Math.max(...daily.map((d) => d.t2m_hi ?? -99));
-        if (activity === 'beach' && (maxRainHi > 15 || maxTHi > 36)) return;
-        if (activity === 'hike' && (maxRainHi > 20 || maxTHi > 36)) return;
 
-        // Score
+        // Hard safety filters (configurable + slightly relaxed defaults)
+        if (
+          (activity === 'beach' &&
+            (maxRainHi > this.beachMaxRainHi || maxTHi > this.maxTHiAll)) ||
+          (activity === 'hike' &&
+            (maxRainHi > this.hikeMaxRainHi || maxTHi > this.maxTHiAll))
+        ) {
+          rejected.byWeather++;
+          return null;
+        }
+
         const scores = daily.map((d) => scoreDay(d.t2m, d.precip));
         const goodDays = scores.filter((s) => s >= 3).length;
-        const minGood = opts.minGoodDays ?? 1;
-        if (goodDays < minGood) return;
+        if (goodDays < minGoodDays) {
+          rejected.byGoodDays++;
+          return null;
+        }
 
         const sumRain = daily.reduce((a, b) => a + (b.precip ?? 0), 0);
         const avgT =
           daily.reduce((a, b) => a + (b.t2m ?? 0), 0) / (daily.length || 1);
-        const score = scores.reduce((a, b) => a + b, 0);
+        const totalScore = scores.reduce((a, b) => a + b, 0);
 
-        results.push({
+        return {
           place: p,
           activity,
-          score,
+          score: totalScore,
           summary: {
             goodDays,
             days: daily.length,
@@ -144,14 +246,83 @@ export class PlacesSuggestService {
             maxRainHi,
             maxTHi,
           },
-        });
-      });
-      await Promise.all(promises);
-    }
+        };
+      } catch {
+        rejected.byError++;
+        return null;
+      }
+    });
 
-    // 4) Sort & return
-    return results.sort(
+    const results = (computed.filter(Boolean) as NonNullable<Row>[]).sort(
       (a, b) => b.score - a.score || a.place.distance_m - b.place.distance_m,
     );
+
+    // 4) If nothing passed, run a relaxed fallback so UI isn’t empty
+    if (results.length === 0) {
+      this.log.warn(
+        `No suggestions after filtering. candidates=${batch.length} rejected=${JSON.stringify(
+          rejected,
+        )}. Running relaxed fallback.`,
+      );
+
+      const nearest = batch.slice(0, Math.min(10, batch.length));
+      const fallback: NonNullable<Row>[] = [];
+
+      for (const p of nearest) {
+        try {
+          const dailyRaw = await this.forecast(p.lat, p.lon);
+          const daily = dailyRaw.filter((d) =>
+            inRange(d.date, opts.start, opts.end),
+          );
+          if (!daily.length) continue;
+
+          const scores = daily.map((d) => scoreDay(d.t2m, d.precip));
+          const goodDays = scores.filter((s) => s >= 3).length;
+
+          const sumRain = daily.reduce((a, b) => a + (b.precip ?? 0), 0);
+          const avgT =
+            daily.reduce((a, b) => a + (b.t2m ?? 0), 0) / (daily.length || 1);
+
+          fallback.push({
+            place: p,
+            activity: activityFromCategory(p.category),
+            score: scores.reduce((a, b) => a + b, 0),
+            summary: {
+              goodDays,
+              days: daily.length,
+              sumRain: +sumRain.toFixed(1),
+              avgT: +avgT.toFixed(1),
+              maxRainHi: Math.max(...daily.map((d) => d.precip_hi ?? 0)),
+              maxTHi: Math.max(...daily.map((d) => d.t2m_hi ?? -99)),
+            },
+          });
+        } catch {
+          // ignore
+        }
+      }
+
+      if (fallback.length === 0) {
+        // last resort — nearest places without weather summaries
+        return nearest.map((p) => ({
+          place: p,
+          activity: activityFromCategory(p.category),
+          score: 0,
+          summary: {
+            goodDays: 0,
+            days: 0,
+            sumRain: 0,
+            avgT: 0,
+            maxRainHi: 0,
+            maxTHi: 0,
+          },
+        }));
+      }
+
+      return fallback.sort(
+        (a, b) => b.score - a.score || a.place.distance_m - b.place.distance_m,
+      );
+    }
+
+    return results;
   }
 }

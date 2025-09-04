@@ -1,3 +1,4 @@
+// src/weather/forecast.service.ts
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
@@ -104,14 +105,81 @@ interface OWMResp {
 
 @Injectable()
 export class ForecastService {
-  constructor(
-    private http: HttpService,
-    private cfg: ConfigService,
-  ) {}
+  /** Flask (your Python service) */
+  private readonly flaskBase: string;
+  private readonly flaskTimeoutMs: number;
+  private readonly flaskRetries: number;
+  private readonly flaskBackoffMs: number;
 
-  private base(): string {
-    return this.cfg.get<string>('FLASK_BASE') ?? 'http://127.0.0.1:8000';
+  /** OpenWeather */
+  private readonly owBase: string;
+  private readonly owKey?: string;
+  private readonly owUnits: string;
+  private readonly owTimeoutMs: number;
+  private readonly owRetries: number;
+  private readonly owBackoffMs: number;
+
+  constructor(
+    private readonly http: HttpService,
+    private readonly cfg: ConfigService,
+  ) {
+    // -------- Flask config --------
+    this.flaskBase =
+      this.cfg.get<string>('FLASK_BASE') ?? 'http://127.0.0.1:8000';
+    this.flaskTimeoutMs = this.num(
+      this.cfg.get<string>('FLASK_TIMEOUT_MS'),
+      45_000,
+    );
+    this.flaskRetries = this.num(this.cfg.get<string>('FLASK_RETRIES'), 2);
+    this.flaskBackoffMs = this.num(
+      this.cfg.get<string>('FLASK_RETRY_BACKOFF_MS'),
+      800,
+    );
+
+    // -------- OpenWeather config --------
+    this.owBase =
+      this.cfg.get<string>('OPENWEATHER_BASE') ??
+      'https://api.openweathermap.org/data/2.5';
+    this.owKey = this.cfg.get<string>('OPENWEATHER_API_KEY');
+    this.owUnits = this.cfg.get<string>('OPENWEATHER_UNITS') ?? 'metric';
+    this.owTimeoutMs = this.num(
+      this.cfg.get<string>('OPENWEATHER_TIMEOUT_MS'),
+      12_000,
+    );
+    this.owRetries = this.num(this.cfg.get<string>('OPENWEATHER_RETRIES'), 1);
+    this.owBackoffMs = this.num(
+      this.cfg.get<string>('OPENWEATHER_RETRY_BACKOFF_MS'),
+      600,
+    );
   }
+
+  /** safe number parse with fallback */
+  private num(v: unknown, fallback: number): number {
+    const n = typeof v === 'string' ? Number(v) : (v as number);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+  }
+
+  /** Generic retry with exponential backoff */
+  private async withRetry<T>(
+    op: () => Promise<T>,
+    retries: number,
+    backoffMs: number,
+  ): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await op();
+      } catch (e) {
+        lastErr = e;
+        if (attempt === retries) break;
+        const wait = backoffMs * Math.pow(2, attempt); // 0.8s, 1.6s, 3.2s...
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
+    throw lastErr;
+  }
+
+  /** ---------------- Flask-backed endpoints ---------------- */
 
   async forecastByCoords(
     lat: number,
@@ -126,10 +194,17 @@ export class ForecastService {
     if (opts.date) params.date = opts.date;
     if (opts.vars) params.vars = opts.vars;
 
-    const { data } = await firstValueFrom(
-      this.http.get<ApiEnvelope<ForecastPayload>>(this.base() + '/forecast', {
-        params,
-      }),
+    const url = `${this.flaskBase}/forecast`;
+    const { data } = await this.withRetry(
+      () =>
+        firstValueFrom(
+          this.http.get<ApiEnvelope<ForecastPayload>>(url, {
+            params,
+            timeout: this.flaskTimeoutMs,
+          }),
+        ),
+      this.flaskRetries,
+      this.flaskBackoffMs,
     );
     return data;
   }
@@ -148,30 +223,42 @@ export class ForecastService {
     };
     if (opts.vars) params.vars = opts.vars;
 
-    const { data } = await firstValueFrom(
-      this.http.get<ApiEnvelope<HistoryPayload>>(this.base() + '/history', {
-        params,
-      }),
+    const url = `${this.flaskBase}/history`;
+    const { data } = await this.withRetry(
+      () =>
+        firstValueFrom(
+          this.http.get<ApiEnvelope<HistoryPayload>>(url, {
+            params,
+            timeout: this.flaskTimeoutMs,
+          }),
+        ),
+      this.flaskRetries,
+      this.flaskBackoffMs,
     );
     return data;
   }
 
-  /** Current weather from OpenWeather (by coordinates) */
+  /** ---------------- Current (OpenWeather) ---------------- */
+
   async currentByCoords(
     lat: number,
     lon: number,
   ): Promise<ApiEnvelope<CurrentWeather>> {
-    const base =
-      this.cfg.get<string>('OPENWEATHER_BASE') ??
-      'https://api.openweathermap.org/data/2.5';
-    const key = this.cfg.get<string>('OPENWEATHER_API_KEY');
-    const units = this.cfg.get<string>('OPENWEATHER_UNITS') ?? 'metric';
-    if (!key) throw new Error('OPENWEATHER_API_KEY is not set');
+    if (!this.owKey) {
+      throw new Error('OPENWEATHER_API_KEY is not set');
+    }
 
-    const { data } = await firstValueFrom(
-      this.http.get<OWMResp>(`${base}/weather`, {
-        params: { lat, lon, appid: key, units },
-      }),
+    const url = `${this.owBase}/weather`;
+    const { data } = await this.withRetry(
+      () =>
+        firstValueFrom(
+          this.http.get<OWMResp>(url, {
+            params: { lat, lon, appid: this.owKey!, units: this.owUnits },
+            timeout: this.owTimeoutMs,
+          }),
+        ),
+      this.owRetries,
+      this.owBackoffMs,
     );
 
     const atUtc = new Date((data.dt ?? 0) * 1000);

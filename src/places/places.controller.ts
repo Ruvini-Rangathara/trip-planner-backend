@@ -46,7 +46,7 @@ function validate<T>(cls: new () => T, obj: Record<string, unknown>): T {
 }
 
 @ApiTags('Places')
-@Controller('api/places')
+@Controller('/places')
 export class PlacesController {
   constructor(
     private overpass: OverpassService,

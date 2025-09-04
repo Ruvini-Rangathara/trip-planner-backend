@@ -1,26 +1,13 @@
-// src/trip-plan/trip-plan.controller.ts
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Query,
-} from '@nestjs/common';
-import {
-  ApiOkResponse,
-  ApiOperation,
-  ApiQuery,
-  ApiTags,
-} from '@nestjs/swagger';
+import { Body, Controller, Post } from '@nestjs/common';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TripPlanService } from './trip-plan.service';
 import { CreateTripPlanDto } from './dto/create-trip-plan.dto';
 import { UpdateTripPlanDto } from './dto/update-trip-plan.dto';
 import { DeleteTripPlanDto } from './dto/delete-trip-plan.dto';
-// ⬇️ use GetOneTripPlanRequestDto (there is no GetTripPlanDto)
-import { GetOneTripPlanRequestDto } from './dto/get-trip-plan.dto';
+import {
+  GetAllTripPlanRequestDto,
+  GetOneTripPlanRequestDto,
+} from './dto/get-trip-plan.dto';
 import { TripPlanDto } from './dto/trip-plan.dto';
 
 interface ApiEnvelope<T> {
@@ -30,11 +17,12 @@ interface ApiEnvelope<T> {
 }
 
 @ApiTags('Trip Plans')
-@Controller('api/trip-plans')
+@Controller('/trip-plans')
 export class TripPlanController {
   constructor(private readonly svc: TripPlanService) {}
 
-  @Post()
+  /** CREATE */
+  @Post('create')
   @ApiOperation({ summary: 'Create a trip plan' })
   @ApiOkResponse({ type: TripPlanDto })
   async create(
@@ -44,7 +32,8 @@ export class TripPlanController {
     return { code: 200, message: 'OK', data };
   }
 
-  @Patch()
+  /** UPDATE */
+  @Post('update')
   @ApiOperation({ summary: 'Update a trip plan (id required)' })
   @ApiOkResponse({ type: TripPlanDto })
   async update(
@@ -54,7 +43,8 @@ export class TripPlanController {
     return { code: 200, message: 'OK', data };
   }
 
-  @Delete()
+  /** DELETE */
+  @Post('delete')
   @ApiOperation({
     summary: 'Delete a trip plan (hard delete with areas & alerts)',
   })
@@ -65,69 +55,66 @@ export class TripPlanController {
     return { code: 200, message: 'OK', data };
   }
 
-  @Get(':id')
+  /** GET ONE (POST) */
+  @Post('get-one')
   @ApiOperation({ summary: 'Get one trip plan with areas & alerts' })
   @ApiOkResponse({ type: TripPlanDto })
   async getOne(
-    @Param('id') id: GetOneTripPlanRequestDto['id'],
+    @Body() dto: GetOneTripPlanRequestDto,
   ): Promise<ApiEnvelope<TripPlanDto>> {
-    // ⬇️ TripPlanService has getOne(dto), not findOne(...)
-    const data = await this.svc.getOne({ id });
+    const data = await this.svc.getOne({ id: dto.id });
     return { code: 200, message: 'OK', data };
   }
 
-  @Get()
+  /** LIST BY USER (POST) */
+  @Post('list')
   @ApiOperation({
     summary: 'List user trip plans filtered by time (old|future|all)',
   })
-  @ApiQuery({ name: 'userId', required: true })
-  @ApiQuery({
-    name: 'when',
-    required: false,
-    enum: ['old', 'future', 'all'],
-    example: 'all',
-  })
   async list(
-    @Query('userId') userId: string,
-    @Query('when') when: 'old' | 'future' | 'all' = 'all',
+    @Body() dto: GetAllTripPlanRequestDto,
   ): Promise<ApiEnvelope<TripPlanDto[]>> {
-    const data = await this.svc.listByUser(userId, when);
+    const data = await this.svc.listByUser(dto.userId, dto.when ?? 'all');
     return { code: 200, message: 'OK', data };
   }
 
-  @Post(':id/areas:replace')
+  /** REPLACE AREAS (POST) */
+  @Post('areas:replace')
   @ApiOperation({
     summary:
       'Replace areas for a trip (transactional) and log a suggestion alert',
   })
   @ApiOkResponse({ type: TripPlanDto })
   async replaceAreas(
-    @Param('id') id: string,
     @Body()
-    body: { areas: { area: string; latitude: number; longitude: number }[] },
+    body: {
+      tripId: string;
+      areas: { area: string; latitude: number; longitude: number }[];
+    },
   ): Promise<ApiEnvelope<TripPlanDto>> {
-    const data = await this.svc.replaceAreas(id, body.areas ?? []);
+    const data = await this.svc.replaceAreas(body.tripId, body.areas ?? []);
     return { code: 200, message: 'OK', data };
   }
 
+  /** SUGGESTIONS / FORECAST (POST) */
   @Post('request')
   @ApiOperation({
-    summary: 'Suggest a trip plan or fetch forecast for a chosen area/date',
+    summary: 'Suggest nearby places or fetch forecast for area/date',
     description:
-      'If no area is provided, returns nearby suggestions within 30km filtered by predicted weather. ' +
-      'If area is provided with date → one-day forecast. If area and no date → 30-day forecast.',
+      '- If no area → suggestions near lat/lon (filtered by weather).\n' +
+      '- If area + date → one-day forecast.\n' +
+      '- If area only → 30-day forecast.',
   })
   async request(
     @Body()
     body: {
-      place?: string;
+      place?: string; // “Galle” etc — used to geocode lat/lon when missing
       lat?: number;
       lon?: number;
-      area?: string;
-      date?: string;
+      area?: string; // when set, forecasts this area
+      date?: string; // YYYY-MM-DD (optional)
     },
   ): Promise<ApiEnvelope<any>> {
-    const res = await this.svc.requestTripPlan(body);
-    return res;
+    return this.svc.requestTripPlan(body);
   }
 }

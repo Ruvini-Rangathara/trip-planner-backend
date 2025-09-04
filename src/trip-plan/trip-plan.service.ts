@@ -1,6 +1,5 @@
-// src/trip-plan/trip-plan.service.ts
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@prisma/client'; // ⬅️ add this for strong types
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 import { ExceptionFactory } from 'src/common/exception/exception.factory';
 import { CreateTripPlanDto } from './dto/create-trip-plan.dto';
@@ -23,8 +22,8 @@ interface RequestTripInput {
   place?: string;
   lat?: number;
   lon?: number;
-  date?: string; // YYYY-MM-DD
-  area?: string;
+  date?: string; // YYYY-MM-DD (optional)
+  area?: string; // when absent → suggestions mode
 }
 
 @Injectable()
@@ -38,18 +37,15 @@ export class TripPlanService {
     private forecast: ForecastService,
   ) {}
 
-  // ========== CRUD ==========
+  // ---------- CRUD ----------
 
   async create(dto: CreateTripPlanDto): Promise<TripPlanDto> {
-    const start = new Date(dto.startDate);
-    const end = new Date(dto.endDate);
-
     const created = await this.prisma.tripPlan.create({
       data: {
         title: dto.title,
         userId: dto.userId,
-        startDate: start,
-        endDate: end,
+        startDate: new Date(dto.startDate),
+        endDate: new Date(dto.endDate),
       },
       include: { areas: true, alerts: true },
     });
@@ -63,7 +59,6 @@ export class TripPlanService {
       },
     });
 
-    // ⬇️ do NOT call a non-existent findOne; return the created entity
     return new TripPlanDto(created);
   }
 
@@ -71,17 +66,13 @@ export class TripPlanService {
     dto: GetAllTripPlanRequestDto,
   ): Promise<GetAllTripPlanResponseDto> {
     const now = new Date();
-
     const where: Prisma.TripPlanWhereInput = {
       userId: dto.userId,
       deletedAt: null,
     };
 
-    if (dto.when === 'old') {
-      where.endDate = { lt: now };
-    } else if (dto.when === 'future') {
-      where.startDate = { gte: now };
-    }
+    if (dto.when === 'old') where.endDate = { lt: now };
+    else if (dto.when === 'future') where.startDate = { gte: now };
 
     const pagination = PrismaUtil.paginate(dto) as {
       skip?: number;
@@ -144,6 +135,7 @@ export class TripPlanService {
 
     return rows.map((r) => new TripPlanDto(r));
   }
+
   async update(dto: UpdateTripPlanDto): Promise<TripPlanDto> {
     const exists = await this.prisma.tripPlan.findUnique({
       where: { id: dto.id },
@@ -152,9 +144,7 @@ export class TripPlanService {
 
     const data: Prisma.TripPlanUpdateInput = {};
     if (dto.title !== undefined) data.title = dto.title;
-    if (dto.userId !== undefined) {
-      data.user = { connect: { id: dto.userId } }; // ⬅️ update relation properly
-    }
+    if (dto.userId !== undefined) data.user = { connect: { id: dto.userId } };
     if (dto.startDate !== undefined) data.startDate = new Date(dto.startDate);
     if (dto.endDate !== undefined) data.endDate = new Date(dto.endDate);
 
@@ -215,12 +205,22 @@ export class TripPlanService {
     return new TripPlanDto(res);
   }
 
-  // ========== Planner (suggestions + forecast) ==========
+  // ---------- Planner (suggestions + forecast) ----------
 
+  /**
+   * Accepts payload from FE:
+   * { lat, lon, place, date?, area? }
+   * - If area is missing → suggestions near {lat,lon}. If `date` is set, we filter
+   *   the “good weather” window to that specific date; otherwise we consider the next 30 days.
+   * - If area is present:
+   *   • with date → one-day forecast
+   *   • without date → 30-day window forecast
+   */
   async requestTripPlan(req: RequestTripInput) {
     let lat = req.lat;
     let lon = req.lon;
 
+    // Resolve coordinates from place if needed
     if ((lat == null || lon == null) && req.place) {
       const hit = await this.geocode.geocodeLK(req.place);
       lat = hit.lat;
@@ -234,12 +234,17 @@ export class TripPlanService {
       };
     }
 
+    // ---- Suggestions mode (no area) ----
     if (!req.area) {
+      // If the frontend sends a date, constrain suggestions to that day;
+      // otherwise, check the next ~30 days (handled by PlacesSuggestService).
       const suggestions = await this.suggest.suggest({
         lat,
         lon,
         radius: 30000,
         kinds: 'tourism,natural,historic,park',
+        start: req.date ?? undefined,
+        end: req.date ?? undefined,
         minGoodDays: 1,
         limit: 40,
       });
@@ -256,6 +261,8 @@ export class TripPlanService {
       };
     }
 
+    // ---- Forecast mode (area chosen) ----
+    // Try to align the chosen area to one of the nearby known places (fast path)
     const nearby = await this.suggest.suggest({
       lat,
       lon,
@@ -272,6 +279,7 @@ export class TripPlanService {
     let areaLat = chosen?.place.lat;
     let areaLon = chosen?.place.lon;
 
+    // Fallback: geocode the area by name
     if (areaLat == null || areaLon == null) {
       try {
         const hit = await this.geocode.geocodeLK(req.area);
@@ -286,6 +294,7 @@ export class TripPlanService {
       }
     }
 
+    // One-day forecast when a date is provided
     if (req.date) {
       const one = await this.forecast.forecastByCoords(areaLat, areaLon, {
         date: req.date,
@@ -313,6 +322,7 @@ export class TripPlanService {
       };
     }
 
+    // No date → return 30-day window
     const fc = await this.forecast.forecastByCoords(areaLat, areaLon, {
       vars: 'T2M,PRECIP',
       interp: '1',
