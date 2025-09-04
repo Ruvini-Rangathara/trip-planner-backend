@@ -1,4 +1,3 @@
-// src/places/overpass.service.ts
 import { Injectable } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
@@ -234,6 +233,11 @@ export class OverpassService {
     }
 
     throw new Error(lastErrMsg);
+  }
+
+  /** Public API: run raw QL with proper failover/agent */
+  public async runQL(ql: string): Promise<OverpassResponse> {
+    return this.postOverpassWithFailover(ql);
   }
 
   /** Public API: find nearby travel POIs (with categories) */
