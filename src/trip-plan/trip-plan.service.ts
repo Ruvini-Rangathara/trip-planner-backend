@@ -20,11 +20,29 @@ import {
 
 import PrismaUtil from 'src/common/util/PrismaUtil';
 
+// ⬇️ add these to enable suggestions + geocoding + forecast
+import { PlacesSuggestService } from 'src/places/places-suggest.service';
+import { GeocodeService } from 'src/weather/geocode.service';
+import { ForecastService } from 'src/weather/forecast.service';
+
+type RequestTripInput = {
+  place?: string; // free text place in Sri Lanka
+  lat?: number;
+  lon?: number;
+  area?: string; // when provided, forecast for this area
+  date?: string; // YYYY-MM-DD (optional)
+};
+
 @Injectable()
 export class TripPlanService {
   private readonly logger = new Logger(TripPlanService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private suggest: PlacesSuggestService,
+    private geocode: GeocodeService,
+    private forecast: ForecastService,
+  ) {}
 
   // ---------- CREATE ----------
 
@@ -76,7 +94,7 @@ export class TripPlanService {
       deletedAt: null,
     };
 
-    // Single-date filtering
+    // Single-date filtering (your schema uses a single "date" field)
     if (dto.when === 'old') where.date = { lt: now };
     else if (dto.when === 'future') where.date = { gte: now };
 
@@ -119,7 +137,7 @@ export class TripPlanService {
     return new GetOneTripPlanResponseDto(row);
   }
 
-  // ---------- UPDATE (focus on areas diff) ----------
+  // ---------- UPDATE (areas diff) ----------
 
   /**
    * Update base TripPlan fields; and if `areas` provided:
@@ -128,7 +146,7 @@ export class TripPlanService {
    * - Delete areas that are not present in request.
    *
    * Identification is by the `area` string (exact match).
-   * Coordinates are **not** updated when area exists (as requested).
+   * Coordinates are **not** updated when area exists.
    */
   async update(dto: UpdateTripPlanDto): Promise<TripPlanDto> {
     const exists = await this.prisma.tripPlan.findUnique({
@@ -138,7 +156,7 @@ export class TripPlanService {
     if (!exists) throw ExceptionFactory.trip('TRIP_NOT_FOUND');
 
     if (dto.areas && dto.areas.length === 0) {
-      // Enforce at least one area if client chooses to send areas explicitly
+      // If client chooses to send areas explicitly, enforce at least one
       throw ExceptionFactory.trip('TRIP_AREAS_REQUIRED');
     }
 
@@ -157,7 +175,6 @@ export class TripPlanService {
 
       // 2) Sync areas if provided
       if (dto.areas) {
-        // Current areas (non-deleted)
         const current = await tx.tripArea.findMany({
           where: { tripId: dto.id, deletedAt: null },
           select: { id: true, area: true },
@@ -166,12 +183,12 @@ export class TripPlanService {
         const currentByName = new Map(current.map((a) => [a.area, a]));
         const incomingNames = new Set(dto.areas.map((a) => a.area));
 
-        // Find toDelete = existing names not in incoming
+        // delete areas absent in incoming
         const toDeleteIds = current
           .filter((a) => !incomingNames.has(a.area))
           .map((a) => a.id);
 
-        // Find toCreate = incoming names not existing yet
+        // create areas not existing yet
         const toCreate = dto.areas.filter((a) => !currentByName.has(a.area));
 
         if (toDeleteIds.length) {
@@ -189,7 +206,6 @@ export class TripPlanService {
         }
       }
 
-      // 3) Return full updated trip with areas
       return tx.tripPlan.findUnique({
         where: { id: dto.id },
         include: { areas: { where: { deletedAt: null } } },
@@ -206,8 +222,134 @@ export class TripPlanService {
     const exists = await this.prisma.tripPlan.findUnique({ where: { id } });
     if (!exists) throw ExceptionFactory.trip('TRIP_NOT_FOUND');
 
-    // onDelete: Cascade on relations handles TripArea rows
     await this.prisma.tripPlan.delete({ where: { id } });
     return { id };
+  }
+
+  // ---------- SUGGESTIONS + FORECAST ----------
+  /**
+   * Planner entry:
+   * - If no `area`: return weather-filtered place suggestions near lat/lon.
+   * - If `area` + `date`: return one-day forecast for that area/date.
+   * - If `area` only: return 30-day forecast for that area.
+   * If lat/lon are missing but `place` is provided, we geocode it (Sri Lanka only).
+   */
+  async requestTripPlan(req: RequestTripInput) {
+    let lat = req.lat;
+    let lon = req.lon;
+
+    if ((lat == null || lon == null) && req.place) {
+      const hit = await this.geocode.geocodeLK(req.place);
+      lat = hit.lat;
+      lon = hit.lon;
+    }
+    if (lat == null || lon == null) {
+      return {
+        code: 400,
+        message: 'Provide a place (Sri Lanka) or lat/lon.',
+        data: null,
+      };
+    }
+
+    // No area: suggestions near center point (30 km) filtered by weather
+    if (!req.area) {
+      const suggestions = await this.suggest.suggest({
+        lat,
+        lon,
+        radius: 30000,
+        kinds: 'tourism,natural,historic,park',
+        minGoodDays: 1,
+        limit: 40,
+      });
+
+      return {
+        code: 200,
+        message: 'OK',
+        data: {
+          mode: 'suggestions' as const,
+          center: { lat, lon },
+          suggestions,
+          hint: 'Pick an area name and call again with { area } and optional { date }.',
+        },
+      };
+    }
+
+    // Have area: find it among nearby (to snap to the right coords)
+    const nearby = await this.suggest.suggest({
+      lat,
+      lon,
+      radius: 30000,
+      kinds: 'tourism,natural,historic,park',
+      limit: 60,
+    });
+
+    const chosen =
+      nearby.find(
+        (s) => s.place.name.toLowerCase() === req.area!.toLowerCase(),
+      ) ?? null;
+
+    let areaLat = chosen?.place.lat;
+    let areaLon = chosen?.place.lon;
+
+    // If not found in nearby list → try geocoding the area name
+    if (areaLat == null || areaLon == null) {
+      try {
+        const hit = await this.geocode.geocodeLK(req.area);
+        areaLat = hit.lat;
+        areaLon = hit.lon;
+      } catch {
+        return {
+          code: 404,
+          message: 'Area not found near the given point.',
+          data: null,
+        };
+      }
+    }
+
+    // One-day forecast
+    if (req.date) {
+      const one = await this.forecast.forecastByCoords(areaLat, areaLon, {
+        date: req.date,
+        vars: 'T2M,PRECIP',
+        interp: '1',
+      });
+
+      const r = one?.data?.daily?.[0];
+      const weatherNote =
+        r?.precip_hi && r.precip_hi > 15
+          ? 'Heavy rain expected — consider indoor activities.'
+          : undefined;
+
+      return {
+        code: 200,
+        message: 'OK',
+        data: {
+          mode: 'forecast-one' as const,
+          center: { lat, lon },
+          selectedArea: { name: req.area, lat: areaLat, lon: areaLon },
+          date: req.date,
+          daily: one.data.daily,
+          note: weatherNote,
+        },
+      };
+    }
+
+    // 30-day forecast (no date)
+    const fc = await this.forecast.forecastByCoords(areaLat, areaLon, {
+      vars: 'T2M,PRECIP',
+      interp: '1',
+    });
+
+    return {
+      code: 200,
+      message: 'OK',
+      data: {
+        mode: 'forecast-30' as const,
+        center: { lat, lon },
+        selectedArea: { name: req.area, lat: areaLat, lon: areaLon },
+        window: fc.data.forecast_window,
+        daily: fc.data.daily,
+      },
+    };
   }
 }

@@ -86,4 +86,26 @@ export class TripPlanController {
     const data = await this.svc.getAll(dto);
     return { code: 200, message: 'OK', data };
   }
+
+  /** SUGGESTIONS / FORECAST (POST) */
+  @Post('request')
+  @ApiOperation({
+    summary: 'Suggest nearby places or fetch forecast for area/date',
+    description:
+      '- If no area → suggestions near lat/lon (filtered by weather).\n' +
+      '- If area + date → one-day forecast.\n' +
+      '- If area only → 30-day forecast.',
+  })
+  async request(
+    @Body()
+    body: {
+      place?: string; // “Galle” etc — geocodes to lat/lon if missing
+      lat?: number;
+      lon?: number;
+      area?: string; // when set, forecasts this area
+      date?: string; // YYYY-MM-DD (optional)
+    },
+  ): Promise<ApiEnvelope<any>> {
+    return this.svc.requestTripPlan(body);
+  }
 }
