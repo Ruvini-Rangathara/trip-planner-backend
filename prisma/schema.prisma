@@ -51,13 +51,11 @@ model User {
 model TripPlan {
   id        String     @id @default(uuid())
   userId    String
-  user      User       @relation(fields: [userId], references: [id])
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   status    TripStatus @default(PLANNED)
-  startDate DateTime
-  endDate   DateTime
+  date      DateTime
   areas     TripArea[]
-  alerts    Alert[]
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime?
@@ -66,21 +64,10 @@ model TripPlan {
 model TripArea {
   id        String    @id @default(uuid())
   tripId    String
-  trip      TripPlan  @relation(fields: [tripId], references: [id])
+  trip      TripPlan  @relation(fields: [tripId], references: [id], onDelete: Cascade)
   area      String
   longitude Float
   latitude  Float
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
-}
-
-model Alert {
-  id        String    @id @default(uuid())
-  tripId    String
-  trip      TripPlan  @relation(fields: [tripId], references: [id])
-  type      AlertType
-  message   String
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?

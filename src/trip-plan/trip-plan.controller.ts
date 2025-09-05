@@ -1,12 +1,16 @@
+// src/trip-plan/trip-plan.controller.ts
 import { Body, Controller, Post } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { TripPlanService } from './trip-plan.service';
+
 import { CreateTripPlanDto } from './dto/create-trip-plan.dto';
 import { UpdateTripPlanDto } from './dto/update-trip-plan.dto';
 import { DeleteTripPlanDto } from './dto/delete-trip-plan.dto';
 import {
   GetAllTripPlanRequestDto,
+  GetAllTripPlanResponseDto,
   GetOneTripPlanRequestDto,
+  GetOneTripPlanResponseDto,
 } from './dto/get-trip-plan.dto';
 import { TripPlanDto } from './dto/trip-plan.dto';
 
@@ -23,7 +27,9 @@ export class TripPlanController {
 
   /** CREATE */
   @Post('create')
-  @ApiOperation({ summary: 'Create a trip plan' })
+  @ApiOperation({
+    summary: 'Create a trip plan (must include at least one area)',
+  })
   @ApiOkResponse({ type: TripPlanDto })
   async create(
     @Body() dto: CreateTripPlanDto,
@@ -32,9 +38,12 @@ export class TripPlanController {
     return { code: 200, message: 'OK', data };
   }
 
-  /** UPDATE */
+  /** UPDATE (areas diffed transactionally in service) */
   @Post('update')
-  @ApiOperation({ summary: 'Update a trip plan (id required)' })
+  @ApiOperation({
+    summary:
+      'Update a trip plan. If "areas" is provided, new areas are created, removed ones are deleted; existing (same name) are kept.',
+  })
   @ApiOkResponse({ type: TripPlanDto })
   async update(
     @Body() dto: UpdateTripPlanDto,
@@ -45,9 +54,7 @@ export class TripPlanController {
 
   /** DELETE */
   @Post('delete')
-  @ApiOperation({
-    summary: 'Delete a trip plan (hard delete with areas & alerts)',
-  })
+  @ApiOperation({ summary: 'Delete a trip plan (cascades TripArea rows)' })
   async remove(
     @Body() dto: DeleteTripPlanDto,
   ): Promise<ApiEnvelope<{ id: string }>> {
@@ -55,66 +62,28 @@ export class TripPlanController {
     return { code: 200, message: 'OK', data };
   }
 
-  /** GET ONE (POST) */
+  /** GET ONE */
   @Post('get-one')
-  @ApiOperation({ summary: 'Get one trip plan with areas & alerts' })
-  @ApiOkResponse({ type: TripPlanDto })
+  @ApiOperation({ summary: 'Get one trip plan with areas' })
+  @ApiOkResponse({ type: GetOneTripPlanResponseDto })
   async getOne(
     @Body() dto: GetOneTripPlanRequestDto,
-  ): Promise<ApiEnvelope<TripPlanDto>> {
+  ): Promise<ApiEnvelope<GetOneTripPlanResponseDto>> {
     const data = await this.svc.getOne({ id: dto.id });
     return { code: 200, message: 'OK', data };
   }
 
-  /** LIST BY USER (POST) */
-  @Post('list')
-  @ApiOperation({
-    summary: 'List user trip plans filtered by time (old|future|all)',
-  })
-  async list(
-    @Body() dto: GetAllTripPlanRequestDto,
-  ): Promise<ApiEnvelope<TripPlanDto[]>> {
-    const data = await this.svc.listByUser(dto.userId, dto.when ?? 'all');
-    return { code: 200, message: 'OK', data };
-  }
-
-  /** REPLACE AREAS (POST) */
-  @Post('areas:replace')
+  /** GET ALL (paged) */
+  @Post('get-all')
   @ApiOperation({
     summary:
-      'Replace areas for a trip (transactional) and log a suggestion alert',
+      'Get all trip plans for a user (paged). Filter by time with when=old|future|all',
   })
-  @ApiOkResponse({ type: TripPlanDto })
-  async replaceAreas(
-    @Body()
-    body: {
-      tripId: string;
-      areas: { area: string; latitude: number; longitude: number }[];
-    },
-  ): Promise<ApiEnvelope<TripPlanDto>> {
-    const data = await this.svc.replaceAreas(body.tripId, body.areas ?? []);
+  @ApiOkResponse({ type: GetAllTripPlanResponseDto })
+  async getAll(
+    @Body() dto: GetAllTripPlanRequestDto,
+  ): Promise<ApiEnvelope<GetAllTripPlanResponseDto>> {
+    const data = await this.svc.getAll(dto);
     return { code: 200, message: 'OK', data };
-  }
-
-  /** SUGGESTIONS / FORECAST (POST) */
-  @Post('request')
-  @ApiOperation({
-    summary: 'Suggest nearby places or fetch forecast for area/date',
-    description:
-      '- If no area → suggestions near lat/lon (filtered by weather).\n' +
-      '- If area + date → one-day forecast.\n' +
-      '- If area only → 30-day forecast.',
-  })
-  async request(
-    @Body()
-    body: {
-      place?: string; // “Galle” etc — used to geocode lat/lon when missing
-      lat?: number;
-      lon?: number;
-      area?: string; // when set, forecasts this area
-      date?: string; // YYYY-MM-DD (optional)
-    },
-  ): Promise<ApiEnvelope<any>> {
-    return this.svc.requestTripPlan(body);
   }
 }

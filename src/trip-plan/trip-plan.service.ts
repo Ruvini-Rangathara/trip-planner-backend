@@ -1,14 +1,16 @@
+// src/trip-plan/trip-plan.service.ts
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/common/prisma/prisma.service';
 import { ExceptionFactory } from 'src/common/exception/exception.factory';
-import { CreateTripPlanDto } from './dto/create-trip-plan.dto';
+
+import {
+  CreateTripPlanDto,
+  TripAreaInputDto,
+} from './dto/create-trip-plan.dto';
 import { UpdateTripPlanDto } from './dto/update-trip-plan.dto';
 import { TripPlanDto } from './dto/trip-plan.dto';
-import { PlacesSuggestService } from 'src/places/places-suggest.service';
-import { GeocodeService } from 'src/weather/geocode.service';
-import { ForecastService } from 'src/weather/forecast.service';
-import PrismaUtil from 'src/common/util/PrismaUtil';
+
 import {
   GetAllTripPlanRequestDto,
   GetAllTripPlanResponseDto,
@@ -16,51 +18,54 @@ import {
   GetOneTripPlanResponseDto,
 } from './dto/get-trip-plan.dto';
 
-type WhenFilter = 'old' | 'future' | 'all';
-
-interface RequestTripInput {
-  place?: string;
-  lat?: number;
-  lon?: number;
-  date?: string; // YYYY-MM-DD (optional)
-  area?: string; // when absent → suggestions mode
-}
+import PrismaUtil from 'src/common/util/PrismaUtil';
 
 @Injectable()
 export class TripPlanService {
   private readonly logger = new Logger(TripPlanService.name);
 
-  constructor(
-    private prisma: PrismaService,
-    private suggest: PlacesSuggestService,
-    private geocode: GeocodeService,
-    private forecast: ForecastService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
-  // ---------- CRUD ----------
+  // ---------- CREATE ----------
 
   async create(dto: CreateTripPlanDto): Promise<TripPlanDto> {
-    const created = await this.prisma.tripPlan.create({
-      data: {
-        title: dto.title,
-        userId: dto.userId,
-        startDate: new Date(dto.startDate),
-        endDate: new Date(dto.endDate),
-      },
-      include: { areas: true, alerts: true },
+    if (!dto.areas || dto.areas.length === 0) {
+      throw ExceptionFactory.trip('TRIP_AREAS_REQUIRED');
+    }
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      // 1) Create base trip
+      const base = await tx.tripPlan.create({
+        data: {
+          title: dto.title,
+          userId: dto.userId,
+          date: new Date(dto.date),
+          ...(dto.status ? { status: dto.status } : {}),
+        },
+      });
+
+      // 2) Create areas linked to trip
+      await tx.tripArea.createMany({
+        data: dto.areas.map((a: TripAreaInputDto) => ({
+          tripId: base.id,
+          area: a.area,
+          latitude: a.lat,
+          longitude: a.lng,
+        })),
+      });
+
+      // 3) Return complete trip with areas
+      return tx.tripPlan.findUnique({
+        where: { id: base.id },
+        include: { areas: { where: { deletedAt: null } } },
+      });
     });
 
-    await this.prisma.alert.create({
-      data: {
-        tripId: created.id,
-        type: 'SUGGESTION',
-        message:
-          'Trip created. Add areas or request suggestions based on weather.',
-      },
-    });
-
+    if (!created) throw new NotFoundException('Trip not found after create');
     return new TripPlanDto(created);
   }
+
+  // ---------- READ: GET ALL ----------
 
   async getAll(
     dto: GetAllTripPlanRequestDto,
@@ -71,8 +76,9 @@ export class TripPlanService {
       deletedAt: null,
     };
 
-    if (dto.when === 'old') where.endDate = { lt: now };
-    else if (dto.when === 'future') where.startDate = { gte: now };
+    // Single-date filtering
+    if (dto.when === 'old') where.date = { lt: now };
+    else if (dto.when === 'future') where.date = { gte: now };
 
     const pagination = PrismaUtil.paginate(dto) as {
       skip?: number;
@@ -83,10 +89,9 @@ export class TripPlanService {
       this.prisma.tripPlan.findMany({
         ...pagination,
         where,
-        orderBy: { startDate: 'asc' },
+        orderBy: { date: 'asc' },
         include: {
           areas: { where: { deletedAt: null } },
-          alerts: { where: { deletedAt: null } },
         },
       }),
       this.prisma.tripPlan.count({ where }),
@@ -98,6 +103,8 @@ export class TripPlanService {
     );
   }
 
+  // ---------- READ: GET ONE ----------
+
   async getOne(
     dto: GetOneTripPlanRequestDto,
   ): Promise<GetOneTripPlanResponseDto> {
@@ -105,7 +112,6 @@ export class TripPlanService {
       where: { id: dto.id, deletedAt: null },
       include: {
         areas: { where: { deletedAt: null } },
-        alerts: { where: { deletedAt: null } },
       },
     });
 
@@ -113,231 +119,95 @@ export class TripPlanService {
     return new GetOneTripPlanResponseDto(row);
   }
 
-  async listByUser(
-    userId: string,
-    when: WhenFilter = 'all',
-  ): Promise<TripPlanDto[]> {
-    const now = new Date();
-    const base: Prisma.TripPlanWhereInput = { userId, deletedAt: null };
+  // ---------- UPDATE (focus on areas diff) ----------
 
-    const where: Prisma.TripPlanWhereInput =
-      when === 'old'
-        ? { ...base, endDate: { lt: now } }
-        : when === 'future'
-          ? { ...base, startDate: { gte: now } }
-          : base;
-
-    const rows = await this.prisma.tripPlan.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: { areas: true, alerts: { orderBy: { createdAt: 'desc' } } },
-    });
-
-    return rows.map((r) => new TripPlanDto(r));
-  }
-
+  /**
+   * Update base TripPlan fields; and if `areas` provided:
+   * - Keep areas whose `area` name exists in request.
+   * - Create areas whose `area` name is new.
+   * - Delete areas that are not present in request.
+   *
+   * Identification is by the `area` string (exact match).
+   * Coordinates are **not** updated when area exists (as requested).
+   */
   async update(dto: UpdateTripPlanDto): Promise<TripPlanDto> {
     const exists = await this.prisma.tripPlan.findUnique({
       where: { id: dto.id },
+      include: { areas: true },
     });
     if (!exists) throw ExceptionFactory.trip('TRIP_NOT_FOUND');
 
-    const data: Prisma.TripPlanUpdateInput = {};
-    if (dto.title !== undefined) data.title = dto.title;
-    if (dto.userId !== undefined) data.user = { connect: { id: dto.userId } };
-    if (dto.startDate !== undefined) data.startDate = new Date(dto.startDate);
-    if (dto.endDate !== undefined) data.endDate = new Date(dto.endDate);
+    if (dto.areas && dto.areas.length === 0) {
+      // Enforce at least one area if client chooses to send areas explicitly
+      throw ExceptionFactory.trip('TRIP_AREAS_REQUIRED');
+    }
 
-    const updated = await this.prisma.tripPlan.update({
-      where: { id: dto.id },
-      data,
-      include: { areas: true, alerts: { orderBy: { createdAt: 'desc' } } },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // 1) Update base fields
+      const baseData: Prisma.TripPlanUpdateInput = {};
+      if (dto.title !== undefined) baseData.title = dto.title;
+      if (dto.userId !== undefined)
+        baseData.user = { connect: { id: dto.userId } };
+      if (dto.date !== undefined) baseData.date = new Date(dto.date);
+      if (dto.status !== undefined) baseData.status = dto.status;
+
+      if (Object.keys(baseData).length) {
+        await tx.tripPlan.update({ where: { id: dto.id }, data: baseData });
+      }
+
+      // 2) Sync areas if provided
+      if (dto.areas) {
+        // Current areas (non-deleted)
+        const current = await tx.tripArea.findMany({
+          where: { tripId: dto.id, deletedAt: null },
+          select: { id: true, area: true },
+        });
+
+        const currentByName = new Map(current.map((a) => [a.area, a]));
+        const incomingNames = new Set(dto.areas.map((a) => a.area));
+
+        // Find toDelete = existing names not in incoming
+        const toDeleteIds = current
+          .filter((a) => !incomingNames.has(a.area))
+          .map((a) => a.id);
+
+        // Find toCreate = incoming names not existing yet
+        const toCreate = dto.areas.filter((a) => !currentByName.has(a.area));
+
+        if (toDeleteIds.length) {
+          await tx.tripArea.deleteMany({ where: { id: { in: toDeleteIds } } });
+        }
+        if (toCreate.length) {
+          await tx.tripArea.createMany({
+            data: toCreate.map((a) => ({
+              tripId: dto.id,
+              area: a.area,
+              latitude: a.lat,
+              longitude: a.lng,
+            })),
+          });
+        }
+      }
+
+      // 3) Return full updated trip with areas
+      return tx.tripPlan.findUnique({
+        where: { id: dto.id },
+        include: { areas: { where: { deletedAt: null } } },
+      });
     });
 
+    if (!updated) throw new NotFoundException('Trip not found after update');
     return new TripPlanDto(updated);
   }
+
+  // ---------- DELETE ----------
 
   async remove(id: string): Promise<{ id: string }> {
     const exists = await this.prisma.tripPlan.findUnique({ where: { id } });
     if (!exists) throw ExceptionFactory.trip('TRIP_NOT_FOUND');
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.tripArea.deleteMany({ where: { tripId: id } });
-      await tx.alert.deleteMany({ where: { tripId: id } });
-      await tx.tripPlan.delete({ where: { id } });
-    });
-
+    // onDelete: Cascade on relations handles TripArea rows
+    await this.prisma.tripPlan.delete({ where: { id } });
     return { id };
-  }
-
-  async replaceAreas(
-    tripId: string,
-    areas: { area: string; latitude: number; longitude: number }[],
-  ): Promise<TripPlanDto> {
-    const trip = await this.prisma.tripPlan.findUnique({
-      where: { id: tripId },
-    });
-    if (!trip) throw ExceptionFactory.trip('TRIP_NOT_FOUND');
-
-    const res = await this.prisma.$transaction(async (tx) => {
-      await tx.tripArea.deleteMany({ where: { tripId } });
-      if (areas.length) {
-        await tx.tripArea.createMany({
-          data: areas.map((a) => ({
-            tripId,
-            area: a.area,
-            latitude: a.latitude,
-            longitude: a.longitude,
-          })),
-        });
-      }
-      await tx.alert.create({
-        data: { tripId, type: 'SUGGESTION', message: 'Trip areas updated.' },
-      });
-
-      return tx.tripPlan.findUnique({
-        where: { id: tripId },
-        include: { areas: true, alerts: { orderBy: { createdAt: 'desc' } } },
-      });
-    });
-
-    if (!res) throw new NotFoundException('Trip not found after update');
-    return new TripPlanDto(res);
-  }
-
-  // ---------- Planner (suggestions + forecast) ----------
-
-  /**
-   * Accepts payload from FE:
-   * { lat, lon, place, date?, area? }
-   * - If area is missing → suggestions near {lat,lon}. If `date` is set, we filter
-   *   the “good weather” window to that specific date; otherwise we consider the next 30 days.
-   * - If area is present:
-   *   • with date → one-day forecast
-   *   • without date → 30-day window forecast
-   */
-  async requestTripPlan(req: RequestTripInput) {
-    let lat = req.lat;
-    let lon = req.lon;
-
-    // Resolve coordinates from place if needed
-    if ((lat == null || lon == null) && req.place) {
-      const hit = await this.geocode.geocodeLK(req.place);
-      lat = hit.lat;
-      lon = hit.lon;
-    }
-    if (lat == null || lon == null) {
-      return {
-        code: 400,
-        message: 'Provide a place (Sri Lanka) or lat/lon.',
-        data: null,
-      };
-    }
-
-    // ---- Suggestions mode (no area) ----
-    if (!req.area) {
-      // If the frontend sends a date, constrain suggestions to that day;
-      // otherwise, check the next ~30 days (handled by PlacesSuggestService).
-      const suggestions = await this.suggest.suggest({
-        lat,
-        lon,
-        radius: 30000,
-        kinds: 'tourism,natural,historic,park',
-        start: req.date ?? undefined,
-        end: req.date ?? undefined,
-        minGoodDays: 1,
-        limit: 40,
-      });
-
-      return {
-        code: 200,
-        message: 'OK',
-        data: {
-          mode: 'suggestions',
-          center: { lat, lon },
-          suggestions,
-          hint: 'Pick an area name and call again with { area } and optional { date }.',
-        },
-      };
-    }
-
-    // ---- Forecast mode (area chosen) ----
-    // Try to align the chosen area to one of the nearby known places (fast path)
-    const nearby = await this.suggest.suggest({
-      lat,
-      lon,
-      radius: 30000,
-      kinds: 'tourism,natural,historic,park',
-      limit: 60,
-    });
-
-    const chosen =
-      nearby.find(
-        (s) => s.place.name.toLowerCase() === req.area!.toLowerCase(),
-      ) ?? null;
-
-    let areaLat = chosen?.place.lat;
-    let areaLon = chosen?.place.lon;
-
-    // Fallback: geocode the area by name
-    if (areaLat == null || areaLon == null) {
-      try {
-        const hit = await this.geocode.geocodeLK(req.area);
-        areaLat = hit.lat;
-        areaLon = hit.lon;
-      } catch {
-        return {
-          code: 404,
-          message: 'Area not found near the given point.',
-          data: null,
-        };
-      }
-    }
-
-    // One-day forecast when a date is provided
-    if (req.date) {
-      const one = await this.forecast.forecastByCoords(areaLat, areaLon, {
-        date: req.date,
-        vars: 'T2M,PRECIP',
-        interp: '1',
-      });
-
-      const r = one?.data?.daily?.[0];
-      const weatherNote =
-        r?.precip_hi && r.precip_hi > 15
-          ? 'Heavy rain expected — consider indoor activities.'
-          : undefined;
-
-      return {
-        code: 200,
-        message: 'OK',
-        data: {
-          mode: 'forecast-one',
-          center: { lat, lon },
-          selectedArea: { name: req.area, lat: areaLat, lon: areaLon },
-          date: req.date,
-          daily: one.data.daily,
-          note: weatherNote,
-        },
-      };
-    }
-
-    // No date → return 30-day window
-    const fc = await this.forecast.forecastByCoords(areaLat, areaLon, {
-      vars: 'T2M,PRECIP',
-      interp: '1',
-    });
-
-    return {
-      code: 200,
-      message: 'OK',
-      data: {
-        mode: 'forecast-30',
-        center: { lat, lon },
-        selectedArea: { name: req.area, lat: areaLat, lon: areaLon },
-        window: fc.data.forecast_window,
-        daily: fc.data.daily,
-      },
-    };
   }
 }

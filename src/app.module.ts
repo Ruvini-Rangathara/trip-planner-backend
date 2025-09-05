@@ -5,7 +5,6 @@ import { AppService } from './app.service';
 import { UserModule } from './user/user.module';
 import { AuthModule } from './auth/auth.module';
 import { LoggerModule } from 'nestjs-pino';
-import { AlertModule } from './alert/alert.module';
 import { WeatherModule } from './weather/weather.module';
 import { PlacesModule } from './places/places.module';
 import { TripPlanModule } from './trip-plan/trip-plan.module';
@@ -16,7 +15,6 @@ import { TripPlanModule } from './trip-plan/trip-plan.module';
     UserModule,
     AuthModule,
     LoggerModule.forRoot(),
-    AlertModule,
     WeatherModule,
     PlacesModule,
     TripPlanModule,
