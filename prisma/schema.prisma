@@ -1,0 +1,74 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto]
+}
+
+enum TravelType {
+  LEISURE
+  ADVENTURE
+  FAMILY
+  CULTURAL
+}
+
+enum ClimatePreference {
+  WARM
+  COOL
+  AVOID_RAIN
+  NO_PREFERENCE
+}
+
+enum TripStatus {
+  PLANNED
+  ONGOING
+  COMPLETED
+}
+
+enum AlertType {
+  DUE_DATE
+  WEATHER
+  SUGGESTION
+}
+
+model User {
+  id                String             @id @default(uuid())
+  name              String
+  email             String             @unique
+  password          String
+  travelType        TravelType?
+  climatePreference ClimatePreference?
+  tripPlans         TripPlan[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
+}
+
+model TripPlan {
+  id        String     @id @default(uuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  status    TripStatus @default(PLANNED)
+  date      DateTime
+  areas     TripArea[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+}
+
+model TripArea {
+  id        String    @id @default(uuid())
+  tripId    String
+  trip      TripPlan  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  area      String
+  longitude Float
+  latitude  Float
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+}

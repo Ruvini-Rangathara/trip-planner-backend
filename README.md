@@ -1,111 +1,262 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Ceylon Guide - Trip Planner Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+## Overview
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Ceylon Guide is a comprehensive trip planning application that helps users discover and plan trips in Sri Lanka with weather-aware recommendations. The backend is built with NestJS and provides RESTful APIs for user management, weather forecasting, place suggestions, and trip planning.
 
-# Trip Planner Backend
+## 🚀 Features
 
-A NestJS-based backend API for trip planning applications.
+### User Management
+- User registration and authentication with JWT
+- User profile management with travel preferences
+- Secure password hashing with bcrypt
 
-## Description
+### Weather Services
+- **30-day weather forecasts** using NASA POWER data via Flask ML service
+- **Historical weather data** for specific dates
+- **Current weather conditions** from OpenWeather API
+- Support for both coordinates and place name queries
+- Bilinear interpolation for accurate village-level forecasts
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+### Places & Recommendations
+- **Nearby POI discovery** using Overpass API (OpenStreetMap)
+- **Weather-aware suggestions** that filter places based on forecasted conditions
+- Support for various place types: tourism, natural, historic, parks
+- Geocoding services for Sri Lankan locations
 
-## Project setup
+### Trip Planning
+- Create and manage trip plans with multiple destinations
+- Track trip status (Planned, Ongoing, Completed)
+- Area-based trip organization with geographic coordinates
+- Soft delete functionality for data recovery
 
-```bash
-$ npm install
+## 🛠️ Technology Stack
+
+### Backend Framework
+- **NestJS** - Progressive Node.js framework
+- **TypeScript** - Type-safe development
+- **Prisma** - Database ORM with PostgreSQL
+- **JWT** - Authentication and authorization
+
+### External Services
+- **Flask ML Service** - Weather forecasting and prediction models
+- **OpenWeather API** - Current weather conditions
+- **Overpass API** - OpenStreetMap data for places
+- **Nominatim** - Geocoding services
+
+### Database
+- **PostgreSQL** - Primary relational database
+- **Prisma Client** - Type-safe database access
+
+## 📦 Project Structure
+
+```
+src/
+├── common/                 # Shared utilities and modules
+│   ├── decorator/         # Custom decorators (Auth, Validation)
+│   ├── exception/         # Exception handling and factories
+│   ├── prisma/           # Database configuration
+│   └── util/             # Utility functions
+├── user/                  # User management module
+│   ├── dto/              # Data transfer objects
+│   ├── user.controller.ts
+│   ├── user.service.ts
+│   └── user.module.ts
+├── weather/               # Weather services module
+│   ├── dto/              # Weather DTOs
+│   ├── forecast.controller.ts
+│   ├── forecast.service.ts
+│   ├── geocode.service.ts
+│   └── weather.module.ts
+├── places/                # Places and recommendations module
+│   ├── dto/              # Places DTOs
+│   ├── overpass.service.ts
+│   ├── places-suggest.service.ts
+│   ├── places.controller.ts
+│   └── places.module.ts
+├── trip-plan/             # Trip planning module
+│   ├── dto/              # Trip DTOs
+│   ├── trip-plan.controller.ts
+│   ├── trip-plan.service.ts
+│   └── trip-plan.module.ts
+└── app.module.ts          # Root application module
 ```
 
-## Compile and run the project
+## 🚀 Getting Started
 
-```bash
-# development
-$ npm run start
+### Prerequisites
 
-# watch mode
-$ npm run start:dev
+- Node.js (v18 or higher)
+- PostgreSQL database
+- Python Flask service for weather forecasting
+- Redis (optional, for caching)
 
-# production mode
-$ npm run start:prod
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/Ruvini-Rangathara/trip-planner-backend.git
+   cd trip-planner-backend
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Environment Configuration**
+   Create a `.env` file based on `.env.example`:
+   ```env
+   DATABASE_URL="postgresql://username:password@localhost:5432/ceylon_guide"
+   JWT_SECRET="your-jwt-secret-key"
+   FLASK_BASE="http://localhost:8000"
+   OPENWEATHER_API_KEY="your-openweather-api-key"
+   NOMINATIM_BASE="https://nominatim.openstreetmap.org"
+   OVERPASS_BASE="https://overpass-api.de/api/interpreter"
+   ```
+
+4. **Database Setup**
+   ```bash
+   npx prisma generate
+   npx prisma db push
+   ```
+
+5. **Start the application**
+   ```bash
+   # Development
+   npm run start:dev
+
+   # Production
+   npm run build
+   npm run start:prod
+   ```
+
+## 📚 API Documentation
+
+Once the application is running, access the API documentation at:
+- **Swagger UI**: http://localhost:9062/ceylon-guide/api/docs
+- **Health Check**: http://localhost:9062/ceylon-guide/api/health
+
+## 🔐 Authentication
+
+The API uses JWT (JSON Web Tokens) for authentication. Include the token in the Authorization header:
+
+```http
+Authorization: Bearer <your-jwt-token>
 ```
 
-## Run tests
+## 🌤️ Weather Forecasting
 
-```bash
-# unit tests
-$ npm run test
+The weather service provides three types of data:
 
-# e2e tests
-$ npm run test:e2e
+1. **30-day Forecast**: Predictions for temperature and precipitation
+2. **Historical Data**: Past weather conditions for specific dates
+3. **Current Weather**: Real-time conditions from OpenWeather
 
-# test coverage
-$ npm run test:cov
+### Example Weather Request
+```http
+POST /ceylon-guide/api/weather/forecast/by-name?q=Ella&date=2024-09-15
 ```
 
-## Deployment
+## 🗺️ Places & Suggestions
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+The places service helps users discover interesting locations:
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+- **Nearby Places**: Find points of interest within a radius
+- **Weather-aware Suggestions**: Get recommendations based on forecasted weather conditions
+- **Geocoding**: Convert place names to coordinates
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+### Example Suggestion Request
+```http
+POST /ceylon-guide/api/places/suggest?lat=6.9271&lon=79.8612&radius=20000
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## ✈️ Trip Planning
 
-## Resources
+Create and manage travel itineraries:
 
-Check out a few resources that may come in handy when working with NestJS:
+- **Multi-destination trips** with geographic areas
+- **Trip status tracking** (Planned, Ongoing, Completed)
+- **Weather integration** for trip planning
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Example Trip Creation
+```http
+POST /ceylon-guide/api/trip-plans/create
+Content-Type: application/json
 
-## Support
+{
+  "title": "Family trip to Kandy",
+  "userId": "user-uuid",
+  "date": "2024-09-13T00:00:00.000Z",
+  "areas": [
+    {
+      "area": "Kandy",
+      "lat": 7.2906,
+      "lng": 80.6337
+    }
+  ]
+}
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## 🧪 Testing
 
-## Stay in touch
+Run the test suite:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```bash
+# Unit tests
+npm run test
 
-## License
+# E2E tests
+npm run test:e2e
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+# Test coverage
+npm run test:cov
+```
 
-## Author
+## 📊 Database Schema
 
-- **Ruvini Rangathara** - [Ruvini-Rangathara](https://github.com/Ruvini-Rangathara)
-- Email: ruvinisubhasinghe200009@gmail.com
+The application uses PostgreSQL with the following main tables:
 
-## Contributing
+- **User**: User accounts and preferences
+- **TripPlan**: Trip itineraries and metadata
+- **TripArea**: Geographic areas within trips
 
-This project is maintained by [Ruvini-Rangathara](https://github.com/Ruvini-Rangathara). Feel free to contribute by opening issues or submitting pull requests.
+## 🔧 Configuration
+
+Key configuration options in `.env`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Server port | 9062 |
+| `DATABASE_URL` | PostgreSQL connection string | - |
+| `JWT_SECRET` | Secret for JWT signing | - |
+| `FLASK_BASE` | Flask ML service URL | http://localhost:8000 |
+| `OPENWEATHER_API_KEY` | OpenWeather API key | - |
+| `NOMINATIM_BASE` | Geocoding service URL | https://nominatim.openstreetmap.org |
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Support
+
+For support, please open an issue in the GitHub repository or contact the development team.
+
+## 🙏 Acknowledgments
+
+- NASA POWER for historical weather data
+- OpenStreetMap for geographic data
+- OpenWeather for current weather data
+- NestJS team for the excellent framework
+
+---
+
+**Ceylon Guide** - Making trip planning in Sri Lanka smarter with weather-aware recommendations! 🌴☀️🌧️
