@@ -1,0 +1,15 @@
+// jest.config.js
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  rootDir: '.',
+  moduleFileExtensions: ['ts', 'js', 'json'],
+  transform: { '^.+\\.(t|j)s$': 'ts-jest' },
+  testMatch: ['**/*.spec.ts'],
+  moduleNameMapper: {
+    '^src/(.*)$': '<rootDir>/src/$1', // <-- resolves imports like 'src/...'
+  },
+  collectCoverageFrom: ['src/**/*.(t|j)s'],
+  // Ensure ts-jest uses your tsconfig
+  globals: { 'ts-jest': { tsconfig: 'tsconfig.json' } },
+};

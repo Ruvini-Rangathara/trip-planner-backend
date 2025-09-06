@@ -3,14 +3,12 @@ import { UserException } from './constants/user-exception.enum';
 import { AreaException } from './constants/area-exception.enum';
 import { AlertException } from './constants/alert-exception.enum';
 import { TripException } from './constants/trip-exception.enum';
-
 export type ErrorFormat = {
   code: number;
   status: HttpStatus;
   message: string;
   message_si?: string;
 };
-
 export class ExceptionFactory extends HttpException {
   public readonly code: number;
   private constructor(
